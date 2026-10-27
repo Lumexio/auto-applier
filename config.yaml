@@ -1,0 +1,116 @@
+schema_version: "2.0"
+
+daemon:
+  interval_seconds: 3600
+  state_db: "state.db"
+  log_level: "INFO"
+  log_file: "daemon.log"
+  max_cycles: 0
+  shutdown_grace_seconds: 30
+
+paths:
+  facts: "facts.yaml"                  # what the bot may say about you (python answers.py facts-init)
+  artifacts_dir: "./artifacts"
+  applications_dir: "./applications"
+  fixtures_dir: "./tests/fixtures"
+  scratch_dir: "./.scratch"
+
+browser:
+  type: "firefox"                      # "firefox" | "chromium" | "webkit"
+  user_data_dir: "./.browser_profile"  # Persistent context storing manual logins & sessions
+  auto_sync_system_cookies: true       # Auto-import cookies from personal Firefox profile
+
+llm:
+  provider: "openai_compatible"
+  endpoint: "http://127.0.0.1:11434/v1"   # Ollama (nothing listens on the old :8080)
+  model: "qwen2.5:7b"
+  temperature: 0.1
+  max_tokens: 4096
+  timeout_seconds: 60                      # a cold 7B model needs far longer than the old 5s
+  context_tokens: 2048                     # prompt budget. Ollama's default window is 2048; raise BOTH this and the
+                                           # server (set OLLAMA_CONTEXT_LENGTH=8192) for longer postings / more questions
+
+stage1:
+  target_urls:
+    - "https://www.linkedin.com/jobs/"
+    - "https://app.joinhandshake.com/job-search/"
+  max_pages: 10
+  use_headless_browser_when_needed: true
+  blocklist:
+    - "indeed.com"
+    - "glassdoor.com"
+    - "ziprecruiter.com"
+    - "monster.com"
+  robots_respect: true
+  sandbox:
+    cpu_seconds: 60
+    memory_mb: 512
+    forbidden_ast_nodes:
+      - "eval"
+      - "exec"
+      - "subprocess"
+      - "os.system"
+
+stage2:
+  profile_path: "profile.json"
+  safety_factor: 1.2
+  stale_posting_days: 30
+  min_score: 0.25                # postings with a real description must match >= ~2 profile skills
+  min_description_chars: 200     # shorter text (LinkedIn/Handshake cards) is judged by the title gate alone
+  scam_heuristics:
+    - "wire transfer"
+    - "pay for training"
+    - "commission only"
+    - "send money"
+
+stage3:
+  mode: "autonomous"     # autonomous | assisted | dry_run
+  approval_timeout_seconds: 3600
+  confirmation_timeout_seconds: 20     # extra wait for a confirmation page after the handler's own check
+  in_progress_stale_minutes: 10
+  max_attempts: 3        # failed / error-skipped postings are retried at most this many times; unconfirmed ones never
+  rate_limit:
+    global_per_day: 25
+    per_domain_per_hour: 5
+    min_delay_seconds: 5
+    max_delay_seconds: 15
+
+# The application agent: for any site without a dedicated handler (and for "apply on the company site" links from
+# LinkedIn / Handshake) it reads the page, fills what it can answer from facts.yaml, and clicks through the steps.
+# Deterministic rules decide almost everything; the local model only picks between safe buttons on an unusual page,
+# and only when it picks the same one in every menu order. Delete / sign-up / share / download style buttons are
+# never offered to it. Each run leaves a step-by-step trace with a screenshot per step in applications/<job>/trace/.
+#
+# Probation: a kind of application site (an ATS platform such as greenhouse, or a company domain) is filled in and
+# reviewed but NOT submitted until it has earned trust: you approve it (python sites.py approve <site>), it has been
+# prepared cleanly for this many different jobs (dry runs count), or one application there was confirmed.
+agent:
+  enabled: true                  # false: sites without a dedicated handler are skipped instead of explored
+  max_steps: 30                  # pages / clicks one application may take before the agent gives up
+  max_seconds: 360               # wall-clock limit for walking one application
+  consensus: 2                   # model votes (in different menu orders) that must agree; 1 = trust a single answer
+  allowed_domains: []            # extra sites the agent may follow to (e.g. ["jobs.mycompany-careers.com"]); ATS platforms are always allowed
+  probation:
+    enabled: true
+    clean_runs_to_trust: 3       # 0 = only your approval (or a confirmed submission) can trust a site
+
+# Answering the questions on application forms. The bot answers only from facts.yaml (+ contact details in
+# profile.json) and your saved answers (python answers.py set ...); what it cannot answer parks the job.
+answers:
+  enabled: true
+  accept_consents: true          # tick privacy-policy / terms / "my information is accurate" boxes (never marketing opt-ins)
+  open_ended: "review"           # "review": park essay questions for you | "generate": draft them from facts.yaml `narrative`
+  answer_optional: false         # false: leave optional questions the model would have to guess
+
+# Judge each posting against you with the local model, on the real posting text, right before filling anything in.
+fit:
+  enabled: true
+  min_score: 0.5                 # 0..1; below this the job is skipped for good
+  deal_breakers_veto: true       # a deal-breaker the model can quote verbatim from the posting skips it
+  on_llm_error: "allow"          # "allow": apply anyway when the model is unreachable | "skip"
+  min_posting_chars: 300         # less posting text than this and there is nothing to judge
+
+outreach:
+  enabled: false         # OFF until recruiter detection/status handling is fixed (it mis-reported every attempt as already_connected)
+  max_per_day: 5
+  template: "Hi {recruiter_name}, I applied for the {job_title} role at {company}. With my background in {skill}, I'd love to connect. Best, {candidate_name}."

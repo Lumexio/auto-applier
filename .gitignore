@@ -1,0 +1,65 @@
+# ---------------------------------------------------------------------------
+# Personal data. These files describe you; they must never be pushed.
+# (Examples of how to create them are in SETUP.md.)
+# ---------------------------------------------------------------------------
+profile.json
+facts.yaml
+
+# ---------------------------------------------------------------------------
+# Logins, tokens and live sessions
+# ---------------------------------------------------------------------------
+# Persistent browser profile: cookies and logged-in sessions
+.browser_profile/
+# Bearer token for the local REST API
+.api_token
+.env
+.env.*
+*.pem
+*.key
+
+# ---------------------------------------------------------------------------
+# Runtime state and output produced by the daemon
+# ---------------------------------------------------------------------------
+# SQLite database plus its WAL / shared-memory files
+state.db
+state.db-*
+*.db
+*.sqlite
+*.sqlite3
+# Per-job screenshots, answers and traces
+applications/
+artifacts/
+.scratch/
+# Last exported job list
+jobs.json
+daemon.log
+*.log
+# Process ids written by setup.ps1
+*.pid
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+*.egg-info/
+build/
+dist/
+
+# ---------------------------------------------------------------------------
+# Editors and operating system
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

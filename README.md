@@ -7,7 +7,7 @@ until you stop it or shut the PC down.
 There is no cloud AI behind it. The language model is a small open model (default: `qwen2.5:7b`) served locally
 by [Ollama](https://ollama.com), and everything that matters for safety is decided by ordinary code, not by the model.
 
-> **Status:** active development. The pipeline, the answer engine and the safety rails are covered by 184
+> **Status:** active development. The pipeline, the answer engine and the safety rails are covered by 187
 > automated tests, but a brand-new install has no application history, so **every kind of site starts on
 > probation** (filled in and reviewed, not submitted) until you approve it. See [Safety model](#safety-model).
 > Setup instructions are in **[SETUP.md](SETUP.md)**.
@@ -202,6 +202,9 @@ Then run it for real, either `python daemon.py` or `setup.bat -All -Background`.
 - All processing is local. The only network traffic is to the job sites themselves (and a one-time model download).
 - These files contain personal data or live sessions; keep them private and out of version control:
   `profile.json`, `facts.yaml`, `state.db*`, `applications/`, `.browser_profile/`, `.api_token`, `daemon.log`.
+  The included `.gitignore` already excludes them (plus `jobs.json`, `*.pid` and other runtime output). If you
+  ever staged them before adding it, unstage with `git rm -r --cached <path>`; if you already committed or pushed
+  them, treat the browser session and API token as leaked and rotate them.
 - Automated applications can breach the terms of some platforms (LinkedIn in particular). You are responsible for
   how you use this tool; start with dry runs, keep the caps low and review what it sends.
 

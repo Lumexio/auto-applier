@@ -1,0 +1,762 @@
+{
+  "name": "Auto Job Applier Flow",
+  "description": "Visual pipeline for scraping, filtering, and applying to jobs with pre-authenticated Firefox sessions.",
+  "data": {
+    "nodes": [
+      {
+        "data": {
+          "node": {
+            "template": {
+              "_type": "Component",
+              "code": {
+                "type": "code",
+                "required": true,
+                "placeholder": "",
+                "list": false,
+                "show": true,
+                "multiline": true,
+                "value": "from __future__ import annotations\nimport json\nimport os\nimport sys\nfrom pathlib import Path\nfrom typing import Any\n\n# Ensure auto-applier directory is present in sys.path when executed in Langflow sandbox\nfor _p in [Path.cwd(), Path(os.environ.get(\"AUTO_APPLIER_HOME\", \".\"))]:\n    if str(_p) not in sys.path:\n        sys.path.insert(0, str(_p))\n\nfrom langflow.custom import Component\nfrom langflow.io import Output, StrInput, BoolInput, DataInput, FloatInput, DropdownInput\nfrom langflow.schema import Data\n\nfrom profile_gen import parse_resume_to_profile\nfrom scraper import fetch_browser_jobs, fetch_greenhouse_jobs, fetch_lever_jobs\nfrom stage2_filter.rank import stage2_run\nfrom stage3_apply.run import stage3_run\nfrom state import StateStore\nfrom outreach import craft_outreach_message, extract_recruiter_from_job_page, send_recruiter_outreach\n\nclass CandidateProfileComponent(Component):\n    \"\"\"Langflow Component to load, inspect, and update the applicant's profile.\"\"\"\n\n    display_name = \"Candidate Profile\"\n    description = \"Loads and manages applicant profile from resume source of truth.\"\n    name = \"CandidateProfileComponent\"\n\n    inputs = [\n        BoolInput(name=\"reload_from_resume\", display_name=\"Reload from Resume\", value=False)\n    ]\n    outputs = [\n        Output(name=\"profile\", display_name=\"Profile Data\", method=\"build_profile\")\n    ]\n\n    def build_profile(self) -> Data:\n        prof_file = Path(\"profile.json\")\n        if getattr(self, \"reload_from_resume\", False) or not prof_file.is_file():\n            prof = parse_resume_to_profile()\n            prof_file.write_text(json.dumps(prof, indent=2), encoding=\"utf-8\")\n        else:\n            prof = json.loads(prof_file.read_text(encoding=\"utf-8\"))\n        return Data(data=prof)\n\n    def build(self, reload_from_resume: bool = False) -> dict[str, Any]:\n        self.reload_from_resume = reload_from_resume\n        res = self.build_profile()\n        return res.data if hasattr(res, \"data\") else res\n",
+                "fileTypes": [],
+                "file_path": "",
+                "password": false,
+                "name": "code",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": true,
+                "info": "",
+                "load_from_db": false,
+                "title_case": false
+              },
+              "reload_from_resume": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "reload_from_resume",
+                "value": false,
+                "display_name": "Reload from Resume",
+                "advanced": false,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": true,
+                "type": "bool",
+                "_input_type": "BoolInput"
+              }
+            },
+            "description": "Loads and manages applicant profile from resume source of truth.",
+            "base_classes": [
+              "JSON"
+            ],
+            "display_name": "Candidate Profile",
+            "documentation": "",
+            "minimized": false,
+            "custom_fields": {},
+            "output_types": [],
+            "pinned": false,
+            "conditional_paths": [],
+            "frozen": false,
+            "outputs": [
+              {
+                "types": [
+                  "JSON"
+                ],
+                "selected": "JSON",
+                "name": "profile",
+                "display_name": "Profile Data",
+                "method": "build_profile",
+                "value": "__UNDEFINED__",
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": true
+              }
+            ],
+            "field_order": [
+              "reload_from_resume"
+            ],
+            "beta": false,
+            "legacy": false,
+            "edited": false,
+            "metadata": {},
+            "tool_mode": false,
+            "icon": "User"
+          },
+          "type": "CandidateProfileComponent",
+          "id": "CandidateProfile_1",
+          "display_name": "Candidate Profile",
+          "description": "Loads and manages applicant profile from resume source of truth."
+        },
+        "id": "CandidateProfile_1",
+        "type": "genericNode",
+        "position": {
+          "x": 100,
+          "y": 200
+        }
+      },
+      {
+        "data": {
+          "node": {
+            "template": {
+              "_type": "Component",
+              "ats_type": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "options": [
+                  "greenhouse",
+                  "lever",
+                  "browser"
+                ],
+                "options_metadata": [],
+                "combobox": false,
+                "dialog_inputs": {},
+                "toggle": false,
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "ats_type",
+                "value": "greenhouse",
+                "display_name": "ATS Type",
+                "advanced": false,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": true,
+                "external_options": {},
+                "type": "str",
+                "_input_type": "DropdownInput"
+              },
+              "board_token": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "load_from_db": false,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "board_token",
+                "value": "stripe",
+                "display_name": "Board Token or URL",
+                "advanced": false,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "str",
+                "_input_type": "StrInput"
+              },
+              "code": {
+                "type": "code",
+                "required": true,
+                "placeholder": "",
+                "list": false,
+                "show": true,
+                "multiline": true,
+                "value": "from __future__ import annotations\nimport json\nimport os\nimport sys\nfrom pathlib import Path\nfrom typing import Any\n\n# Ensure auto-applier directory is present in sys.path when executed in Langflow sandbox\nfor _p in [Path.cwd(), Path(os.environ.get(\"AUTO_APPLIER_HOME\", \".\"))]:\n    if str(_p) not in sys.path:\n        sys.path.insert(0, str(_p))\n\nfrom langflow.custom import Component\nfrom langflow.io import Output, StrInput, BoolInput, DataInput, FloatInput, DropdownInput\nfrom langflow.schema import Data\n\nfrom profile_gen import parse_resume_to_profile\nfrom scraper import fetch_browser_jobs, fetch_greenhouse_jobs, fetch_lever_jobs\nfrom stage2_filter.rank import stage2_run\nfrom stage3_apply.run import stage3_run\nfrom state import StateStore\nfrom outreach import craft_outreach_message, extract_recruiter_from_job_page, send_recruiter_outreach\n\nclass JobScraperComponent(Component):\n    \"\"\"Langflow Component to scrape job listings from ATS endpoints.\"\"\"\n\n    display_name = \"Job Scraper\"\n    description = \"Ingests job postings from Greenhouse or Lever ATS boards.\"\n    name = \"JobScraperComponent\"\n\n    inputs = [\n        StrInput(name=\"board_token\", display_name=\"Board Token or URL\", value=\"stripe\"),\n        DropdownInput(\n            name=\"ats_type\",\n            display_name=\"ATS Type\",\n            options=[\"greenhouse\", \"lever\", \"browser\"],\n            value=\"greenhouse\",\n        ),\n    ]\n    outputs = [\n        Output(name=\"jobs\", display_name=\"Scraped Jobs\", method=\"scrape_jobs\")\n    ]\n\n    def scrape_jobs(self) -> Data:\n        board = getattr(self, \"board_token\", \"stripe\")\n        ats = (getattr(self, \"ats_type\", None) or \"greenhouse\").lower()\n        if \"greenhouse\" in ats and not board.startswith(\"http\"):\n            jobs = fetch_greenhouse_jobs(board)\n        elif \"lever\" in ats and not board.startswith(\"http\"):\n            jobs = fetch_lever_jobs(board)\n        else:\n            jobs = fetch_browser_jobs(board)\n        print(f\"[Langflow] Scraped {len(jobs)} postings from {board} ({ats}).\")\n        return Data(data={\"jobs\": jobs, \"count\": len(jobs)})\n\n    def build(self, board_token: str = \"stripe\", ats_type: str = \"greenhouse\") -> list[dict[str, Any]]:\n        self.board_token = board_token\n        self.ats_type = ats_type\n        res = self.scrape_jobs()\n        data = res.data if hasattr(res, \"data\") else res\n        return data.get(\"jobs\", [])\n",
+                "fileTypes": [],
+                "file_path": "",
+                "password": false,
+                "name": "code",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": true,
+                "info": "",
+                "load_from_db": false,
+                "title_case": false
+              }
+            },
+            "description": "Ingests job postings from Greenhouse or Lever ATS boards.",
+            "base_classes": [
+              "JSON"
+            ],
+            "display_name": "Job Scraper",
+            "documentation": "",
+            "minimized": false,
+            "custom_fields": {},
+            "output_types": [],
+            "pinned": false,
+            "conditional_paths": [],
+            "frozen": false,
+            "outputs": [
+              {
+                "types": [
+                  "JSON"
+                ],
+                "selected": "JSON",
+                "name": "jobs",
+                "display_name": "Scraped Jobs",
+                "method": "scrape_jobs",
+                "value": "__UNDEFINED__",
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": true
+              }
+            ],
+            "field_order": [
+              "board_token",
+              "ats_type"
+            ],
+            "beta": false,
+            "legacy": false,
+            "edited": false,
+            "metadata": {},
+            "tool_mode": false,
+            "icon": "Globe"
+          },
+          "type": "JobScraperComponent",
+          "id": "JobScraper_1",
+          "display_name": "Job Scraper",
+          "description": "Ingests job postings from Greenhouse or Lever ATS boards."
+        },
+        "id": "JobScraper_1",
+        "type": "genericNode",
+        "position": {
+          "x": 450,
+          "y": 100
+        }
+      },
+      {
+        "data": {
+          "node": {
+            "template": {
+              "_type": "Component",
+              "jobs_data": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "trace_as_input": true,
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "jobs_data",
+                "value": "",
+                "display_name": "Scraped Jobs Data",
+                "advanced": false,
+                "api_editable": false,
+                "input_types": [
+                  "Data",
+                  "JSON"
+                ],
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "other",
+                "_input_type": "JSONInput"
+              },
+              "profile_data": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "trace_as_input": true,
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "profile_data",
+                "value": "",
+                "display_name": "Candidate Profile Data",
+                "advanced": false,
+                "api_editable": false,
+                "input_types": [
+                  "Data",
+                  "JSON"
+                ],
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "other",
+                "_input_type": "JSONInput"
+              },
+              "code": {
+                "type": "code",
+                "required": true,
+                "placeholder": "",
+                "list": false,
+                "show": true,
+                "multiline": true,
+                "value": "from __future__ import annotations\nimport json\nimport os\nimport sys\nfrom pathlib import Path\nfrom typing import Any\n\n# Ensure auto-applier directory is present in sys.path when executed in Langflow sandbox\nfor _p in [Path.cwd(), Path(os.environ.get(\"AUTO_APPLIER_HOME\", \".\"))]:\n    if str(_p) not in sys.path:\n        sys.path.insert(0, str(_p))\n\nfrom langflow.custom import Component\nfrom langflow.io import Output, StrInput, BoolInput, DataInput, FloatInput, DropdownInput\nfrom langflow.schema import Data\n\nfrom profile_gen import parse_resume_to_profile\nfrom scraper import fetch_browser_jobs, fetch_greenhouse_jobs, fetch_lever_jobs\nfrom stage2_filter.rank import stage2_run\nfrom stage3_apply.run import stage3_run\nfrom state import StateStore\nfrom outreach import craft_outreach_message, extract_recruiter_from_job_page, send_recruiter_outreach\n\nclass JobFilterComponent(Component):\n    \"\"\"Langflow Component to filter, deduplicate, and score job listings.\"\"\"\n\n    display_name = \"Job Filter & Ranker\"\n    description = \"Filters jobs by salary, exclusions, and ranks them by candidate skills overlap.\"\n    name = \"JobFilterComponent\"\n\n    inputs = [\n        DataInput(name=\"jobs_data\", display_name=\"Scraped Jobs Data\"),\n        DataInput(name=\"profile_data\", display_name=\"Candidate Profile Data\"),\n        FloatInput(name=\"min_score\", display_name=\"Min Match Score\", value=0.5),\n    ]\n    outputs = [\n        Output(name=\"filtered_jobs\", display_name=\"Filtered Jobs\", method=\"filter_jobs\")\n    ]\n\n    def filter_jobs(self) -> Data:\n        jobs_in = getattr(self, \"jobs_data\", None)\n        if hasattr(jobs_in, \"data\"):\n            jobs = jobs_in.data.get(\"jobs\", [])\n        elif isinstance(jobs_in, dict):\n            jobs = jobs_in.get(\"jobs\", [])\n        elif isinstance(jobs_in, list):\n            jobs = jobs_in\n        else:\n            jobs = []\n\n        prof_in = getattr(self, \"profile_data\", None)\n        if hasattr(prof_in, \"data\"):\n            prof = prof_in.data\n        elif isinstance(prof_in, dict):\n            prof = prof_in\n        else:\n            prof = CandidateProfileComponent().build()\n\n        store = StateStore(\"state.db\")\n        try:\n            run_id = store.start_run(\"stage2\", \"langflow_run\", \"langflow_prof\")\n            filtered, diag = stage2_run(jobs, prof, state=store, run_id=run_id)\n            store.finish_run(run_id, \"completed\")\n            print(f\"[Langflow] Filtered down to {len(filtered)} qualified postings.\")\n            return Data(data={\"jobs\": filtered, \"count\": len(filtered)})\n        finally:\n            store.close()\n\n    def build(self, jobs: list[dict[str, Any]], profile: dict[str, Any] | None = None) -> list[dict[str, Any]]:\n        self.jobs_data = Data(data={\"jobs\": jobs})\n        self.profile_data = Data(data=profile) if profile else None\n        res = self.filter_jobs()\n        data = res.data if hasattr(res, \"data\") else res\n        return data.get(\"jobs\", [])\n",
+                "fileTypes": [],
+                "file_path": "",
+                "password": false,
+                "name": "code",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": true,
+                "info": "",
+                "load_from_db": false,
+                "title_case": false
+              },
+              "min_score": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "min_score",
+                "value": 0.5,
+                "display_name": "Min Match Score",
+                "advanced": false,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": true,
+                "type": "float",
+                "_input_type": "FloatInput"
+              }
+            },
+            "description": "Filters jobs by salary, exclusions, and ranks them by candidate skills overlap.",
+            "base_classes": [
+              "JSON"
+            ],
+            "display_name": "Job Filter & Ranker",
+            "documentation": "",
+            "minimized": false,
+            "custom_fields": {},
+            "output_types": [],
+            "pinned": false,
+            "conditional_paths": [],
+            "frozen": false,
+            "outputs": [
+              {
+                "types": [
+                  "JSON"
+                ],
+                "selected": "JSON",
+                "name": "filtered_jobs",
+                "display_name": "Filtered Jobs",
+                "method": "filter_jobs",
+                "value": "__UNDEFINED__",
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": true
+              }
+            ],
+            "field_order": [
+              "jobs_data",
+              "profile_data",
+              "min_score"
+            ],
+            "beta": false,
+            "legacy": false,
+            "edited": false,
+            "metadata": {},
+            "tool_mode": false,
+            "icon": "Filter"
+          },
+          "type": "JobFilterComponent",
+          "id": "JobFilter_1",
+          "display_name": "Job Filter & Ranker",
+          "description": "Filters jobs by salary, exclusions, and ranks them by candidate skills overlap."
+        },
+        "id": "JobFilter_1",
+        "type": "genericNode",
+        "position": {
+          "x": 800,
+          "y": 150
+        }
+      },
+      {
+        "data": {
+          "node": {
+            "template": {
+              "_type": "Component",
+              "filtered_jobs_data": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "trace_as_input": true,
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "filtered_jobs_data",
+                "value": "",
+                "display_name": "Filtered Jobs Data",
+                "advanced": false,
+                "api_editable": false,
+                "input_types": [
+                  "Data",
+                  "JSON"
+                ],
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "other",
+                "_input_type": "JSONInput"
+              },
+              "profile_data": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "trace_as_input": true,
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "profile_data",
+                "value": "",
+                "display_name": "Candidate Profile Data",
+                "advanced": false,
+                "api_editable": false,
+                "input_types": [
+                  "Data",
+                  "JSON"
+                ],
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "other",
+                "_input_type": "JSONInput"
+              },
+              "browser": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "options": [
+                  "firefox",
+                  "chromium"
+                ],
+                "options_metadata": [],
+                "combobox": false,
+                "dialog_inputs": {},
+                "toggle": false,
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "browser",
+                "value": "firefox",
+                "display_name": "Browser Engine",
+                "advanced": false,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": true,
+                "external_options": {},
+                "type": "str",
+                "_input_type": "DropdownInput"
+              },
+              "code": {
+                "type": "code",
+                "required": true,
+                "placeholder": "",
+                "list": false,
+                "show": true,
+                "multiline": true,
+                "value": "from __future__ import annotations\nimport json\nimport os\nimport sys\nfrom pathlib import Path\nfrom typing import Any\n\n# Ensure auto-applier directory is present in sys.path when executed in Langflow sandbox\nfor _p in [Path.cwd(), Path(os.environ.get(\"AUTO_APPLIER_HOME\", \".\"))]:\n    if str(_p) not in sys.path:\n        sys.path.insert(0, str(_p))\n\nfrom langflow.custom import Component\nfrom langflow.io import Output, StrInput, BoolInput, DataInput, FloatInput, DropdownInput\nfrom langflow.schema import Data\n\nfrom profile_gen import parse_resume_to_profile\nfrom scraper import fetch_browser_jobs, fetch_greenhouse_jobs, fetch_lever_jobs\nfrom stage2_filter.rank import stage2_run\nfrom stage3_apply.run import stage3_run\nfrom state import StateStore\nfrom outreach import craft_outreach_message, extract_recruiter_from_job_page, send_recruiter_outreach\n\nclass AutoApplierComponent(Component):\n    \"\"\"Langflow Component to run autonomous or dry-run applications in browser.\"\"\"\n\n    display_name = \"Auto Applier Engine\"\n    description = \"Executes multi-ATS form filling and submissions with pre-authenticated sessions.\"\n    name = \"AutoApplierComponent\"\n\n    inputs = [\n        DataInput(name=\"filtered_jobs_data\", display_name=\"Filtered Jobs Data\"),\n        DataInput(name=\"profile_data\", display_name=\"Candidate Profile Data\"),\n        BoolInput(name=\"dry_run\", display_name=\"Dry Run (No Actual Submit)\", value=True),\n        BoolInput(name=\"enable_outreach\", display_name=\"Recruiter Outreach\", value=True),\n        DropdownInput(\n            name=\"browser\",\n            display_name=\"Browser Engine\",\n            options=[\"firefox\", \"chromium\"],\n            value=\"firefox\",\n        ),\n    ]\n    outputs = [\n        Output(name=\"application_results\", display_name=\"Application Results\", method=\"run_apply\")\n    ]\n\n    def run_apply(self) -> Data:\n        jobs_in = getattr(self, \"filtered_jobs_data\", None)\n        if hasattr(jobs_in, \"data\"):\n            jobs = jobs_in.data.get(\"jobs\", [])\n        elif isinstance(jobs_in, dict):\n            jobs = jobs_in.get(\"jobs\", [])\n        elif isinstance(jobs_in, list):\n            jobs = jobs_in\n        else:\n            jobs = []\n\n        prof_in = getattr(self, \"profile_data\", None)\n        if hasattr(prof_in, \"data\"):\n            prof = prof_in.data\n        elif isinstance(prof_in, dict):\n            prof = prof_in\n        else:\n            prof_file = Path(\"profile.json\")\n            if prof_file.is_file():\n                prof = json.loads(prof_file.read_text(encoding=\"utf-8\"))\n            else:\n                prof = parse_resume_to_profile()\n\n        dry_run = getattr(self, \"dry_run\", True)\n        browser = getattr(self, \"browser\", \"firefox\")\n        enable_outreach = getattr(self, \"enable_outreach\", True)\n\n        store = StateStore(\"state.db\")\n        try:\n            run_id = store.start_run(\"stage3\", \"langflow_apply\", \"langflow_prof\")\n            cfg = {\n                \"stage3\": {\"mode\": \"dry_run\" if dry_run else \"autonomous\"},\n                \"browser\": {\"type\": browser},\n                \"outreach\": {\"enabled\": enable_outreach},\n            }\n            stage3_run(jobs, prof, state=store, run_id=run_id, config=cfg)\n            store.finish_run(run_id, \"completed\")\n            return Data(\n                data={\n                    \"status\": \"success\",\n                    \"jobs_processed\": len(jobs),\n                    \"mode\": cfg[\"stage3\"][\"mode\"],\n                    \"browser\": browser,\n                }\n            )\n        finally:\n            store.close()\n\n    def build(self, jobs: list[dict[str, Any]], dry_run: bool = True) -> dict[str, Any]:\n        self.filtered_jobs_data = Data(data={\"jobs\": jobs})\n        self.dry_run = dry_run\n        res = self.run_apply()\n        return res.data if hasattr(res, \"data\") else res\n",
+                "fileTypes": [],
+                "file_path": "",
+                "password": false,
+                "name": "code",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": true,
+                "info": "",
+                "load_from_db": false,
+                "title_case": false
+              },
+              "dry_run": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "dry_run",
+                "value": true,
+                "display_name": "Dry Run (No Actual Submit)",
+                "advanced": false,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": true,
+                "type": "bool",
+                "_input_type": "BoolInput"
+              },
+              "enable_outreach": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "enable_outreach",
+                "value": false,
+                "display_name": "Recruiter Outreach",
+                "advanced": false,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": true,
+                "type": "bool",
+                "_input_type": "BoolInput"
+              }
+            },
+            "description": "Executes multi-ATS form filling and submissions with pre-authenticated sessions.",
+            "base_classes": [
+              "JSON"
+            ],
+            "display_name": "Auto Applier Engine",
+            "documentation": "",
+            "minimized": false,
+            "custom_fields": {},
+            "output_types": [],
+            "pinned": false,
+            "conditional_paths": [],
+            "frozen": false,
+            "outputs": [
+              {
+                "types": [
+                  "JSON"
+                ],
+                "selected": "JSON",
+                "name": "application_results",
+                "display_name": "Application Results",
+                "method": "run_apply",
+                "value": "__UNDEFINED__",
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": true
+              }
+            ],
+            "field_order": [
+              "filtered_jobs_data",
+              "profile_data",
+              "dry_run",
+              "enable_outreach",
+              "browser"
+            ],
+            "beta": false,
+            "legacy": false,
+            "edited": false,
+            "metadata": {},
+            "tool_mode": false,
+            "icon": "Play"
+          },
+          "type": "AutoApplierComponent",
+          "id": "AutoApplier_1",
+          "display_name": "Auto Applier Engine",
+          "description": "Executes multi-ATS form filling and submissions with pre-authenticated sessions."
+        },
+        "id": "AutoApplier_1",
+        "type": "genericNode",
+        "position": {
+          "x": 1180,
+          "y": 150
+        }
+      },
+      {
+        "data": {
+          "node": {
+            "template": {
+              "_type": "Component",
+              "code": {
+                "type": "code",
+                "required": true,
+                "placeholder": "",
+                "list": false,
+                "show": true,
+                "multiline": true,
+                "value": "from __future__ import annotations\nimport json\nimport os\nimport sys\nfrom pathlib import Path\nfrom typing import Any\n\n# Ensure auto-applier directory is present in sys.path when executed in Langflow sandbox\nfor _p in [Path.cwd(), Path(os.environ.get(\"AUTO_APPLIER_HOME\", \".\"))]:\n    if str(_p) not in sys.path:\n        sys.path.insert(0, str(_p))\n\nfrom langflow.custom import Component\nfrom langflow.io import Output, StrInput, BoolInput, DataInput, FloatInput, DropdownInput\nfrom langflow.schema import Data\n\nfrom profile_gen import parse_resume_to_profile\nfrom scraper import fetch_browser_jobs, fetch_greenhouse_jobs, fetch_lever_jobs\nfrom stage2_filter.rank import stage2_run\nfrom stage3_apply.run import stage3_run\nfrom state import StateStore\nfrom outreach import craft_outreach_message, extract_recruiter_from_job_page, send_recruiter_outreach\n\nclass StateMonitorComponent(Component):\n    \"\"\"Langflow Component to query SQLite database metrics and recent runs.\"\"\"\n\n    display_name = \"Application Metrics\"\n    description = \"Queries state.db for application counts, runs, and success metrics.\"\n    name = \"StateMonitorComponent\"\n\n    inputs = []\n    outputs = [\n        Output(name=\"metrics\", display_name=\"Metrics Data\", method=\"get_metrics\")\n    ]\n\n    def get_metrics(self) -> Data:\n        store = StateStore(\"state.db\")\n        try:\n            cur = store.conn.cursor()\n            cur.execute(\"SELECT COUNT(*) FROM jobs\")\n            total_jobs = cur.fetchone()[0]\n            cur.execute(\"SELECT COUNT(*) FROM applications WHERE status = 'submitted'\")\n            submitted = cur.fetchone()[0]\n            cur.execute(\"SELECT COUNT(*) FROM applications WHERE status = 'pending'\")\n            pending = cur.fetchone()[0]\n            cur.execute(\"SELECT COUNT(*) FROM applications WHERE status = 'skipped'\")\n            skipped = cur.fetchone()[0]\n            try:\n                cur.execute(\"SELECT COUNT(*) FROM recruiter_outreach WHERE status IN ('sent', 'drafted')\")\n                outreaches = cur.fetchone()[0]\n            except Exception:\n                outreaches = 0\n            return Data(\n                data={\n                    \"total_jobs\": total_jobs,\n                    \"submitted\": submitted,\n                    \"pending\": pending,\n                    \"skipped\": skipped,\n                    \"recruiter_outreaches\": outreaches,\n                }\n            )\n        finally:\n            store.close()\n\n    def build(self) -> dict[str, Any]:\n        res = self.get_metrics()\n        return res.data if hasattr(res, \"data\") else res\n",
+                "fileTypes": [],
+                "file_path": "",
+                "password": false,
+                "name": "code",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": true,
+                "info": "",
+                "load_from_db": false,
+                "title_case": false
+              }
+            },
+            "description": "Queries state.db for application counts, runs, and success metrics.",
+            "base_classes": [
+              "JSON"
+            ],
+            "display_name": "Application Metrics",
+            "documentation": "",
+            "minimized": false,
+            "custom_fields": {},
+            "output_types": [],
+            "pinned": false,
+            "conditional_paths": [],
+            "frozen": false,
+            "outputs": [
+              {
+                "types": [
+                  "JSON"
+                ],
+                "selected": "JSON",
+                "name": "metrics",
+                "display_name": "Metrics Data",
+                "method": "get_metrics",
+                "value": "__UNDEFINED__",
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": true
+              }
+            ],
+            "field_order": [],
+            "beta": false,
+            "legacy": false,
+            "edited": false,
+            "metadata": {},
+            "tool_mode": false,
+            "icon": "Activity"
+          },
+          "type": "StateMonitorComponent",
+          "id": "StateMonitor_1",
+          "display_name": "Application Metrics",
+          "description": "Queries state.db for application counts, runs, and success metrics."
+        },
+        "id": "StateMonitor_1",
+        "type": "genericNode",
+        "position": {
+          "x": 800,
+          "y": 450
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "reactflow__edge-JobScraper_1-JobFilter_1",
+        "source": "JobScraper_1",
+        "target": "JobFilter_1",
+        "sourceHandle": "{\"dataType\": \"JSON\", \"id\": \"JobScraper_1\", \"name\": \"jobs\", \"output_types\": [\"JSON\"]}",
+        "targetHandle": "{\"fieldName\": \"jobs_data\", \"id\": \"JobFilter_1\", \"inputTypes\": [\"JSON\"], \"type\": \"other\"}",
+        "data": {
+          "sourceHandle": {
+            "dataType": "JSON",
+            "id": "JobScraper_1",
+            "name": "jobs",
+            "output_types": [
+              "JSON"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "jobs_data",
+            "id": "JobFilter_1",
+            "inputTypes": [
+              "JSON"
+            ],
+            "type": "other"
+          }
+        }
+      },
+      {
+        "id": "reactflow__edge-CandidateProfile_1-JobFilter_1",
+        "source": "CandidateProfile_1",
+        "target": "JobFilter_1",
+        "sourceHandle": "{\"dataType\": \"JSON\", \"id\": \"CandidateProfile_1\", \"name\": \"profile\", \"output_types\": [\"JSON\"]}",
+        "targetHandle": "{\"fieldName\": \"profile_data\", \"id\": \"JobFilter_1\", \"inputTypes\": [\"JSON\"], \"type\": \"other\"}",
+        "data": {
+          "sourceHandle": {
+            "dataType": "JSON",
+            "id": "CandidateProfile_1",
+            "name": "profile",
+            "output_types": [
+              "JSON"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "profile_data",
+            "id": "JobFilter_1",
+            "inputTypes": [
+              "JSON"
+            ],
+            "type": "other"
+          }
+        }
+      },
+      {
+        "id": "reactflow__edge-JobFilter_1-AutoApplier_1",
+        "source": "JobFilter_1",
+        "target": "AutoApplier_1",
+        "sourceHandle": "{\"dataType\": \"JSON\", \"id\": \"JobFilter_1\", \"name\": \"filtered_jobs\", \"output_types\": [\"JSON\"]}",
+        "targetHandle": "{\"fieldName\": \"filtered_jobs_data\", \"id\": \"AutoApplier_1\", \"inputTypes\": [\"JSON\"], \"type\": \"other\"}",
+        "data": {
+          "sourceHandle": {
+            "dataType": "JSON",
+            "id": "JobFilter_1",
+            "name": "filtered_jobs",
+            "output_types": [
+              "JSON"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "filtered_jobs_data",
+            "id": "AutoApplier_1",
+            "inputTypes": [
+              "JSON"
+            ],
+            "type": "other"
+          }
+        }
+      },
+      {
+        "id": "reactflow__edge-CandidateProfile_1-AutoApplier_1",
+        "source": "CandidateProfile_1",
+        "target": "AutoApplier_1",
+        "sourceHandle": "{\"dataType\": \"JSON\", \"id\": \"CandidateProfile_1\", \"name\": \"profile\", \"output_types\": [\"JSON\"]}",
+        "targetHandle": "{\"fieldName\": \"profile_data\", \"id\": \"AutoApplier_1\", \"inputTypes\": [\"JSON\"], \"type\": \"other\"}",
+        "data": {
+          "sourceHandle": {
+            "dataType": "JSON",
+            "id": "CandidateProfile_1",
+            "name": "profile",
+            "output_types": [
+              "JSON"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "profile_data",
+            "id": "AutoApplier_1",
+            "inputTypes": [
+              "JSON"
+            ],
+            "type": "other"
+          }
+        }
+      }
+    ],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 1
+    }
+  }
+}
