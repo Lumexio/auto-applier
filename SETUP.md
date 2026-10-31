@@ -179,6 +179,48 @@ stage1:
 Greenhouse and Lever boards are the most reliable sources. A URL on those domains that does not name a company is
 skipped. Any other URL is opened in the browser and scraped.
 
+Two things to know about company boards:
+
+* A posting's apply link can point at the company's own careers site (Dropbox and CircleCI do) instead of Greenhouse. The
+  agent still handles it, but that site is a new kind of site for [probation](#72-approve-sites-probation): prepared, not
+  submitted, until you approve it or it has been prepared cleanly a few times.
+* `stage2.stale_posting_days` counts from the date a posting was **first published**, and some companies keep evergreen
+  listings open for years (Canonical's median is over two years). The built-in default is 30 days, which dropped 83% of
+  the postings on seven boards tried, so `config.yaml` uses 90. If a board you added still yields almost nothing, check
+  the stage 2 line of the log for how many postings were dropped as expired.
+
+### Where you can work: `stage2.location`
+
+```yaml
+stage2:
+  location:
+    enabled: true
+    remote_authorized: keep   # "Remote - US" when you may work there but live elsewhere: keep | drop
+    check_description: true   # read "must reside in the United States" style sentences
+    always_keep: []           # words that keep a posting whatever its location says, e.g. ["lisbon"]
+```
+
+The filter removes postings you could not take up, before any model spends time on them. It reads **where you live**
+(`location.country`, `location.city`), **where you may work** (`work_authorization.authorized_countries`) and **whether
+you would relocate** (`location.willing_to_relocate`) from `facts.yaml`, with `profile.json` as the fallback. If it cannot
+tell where you live it does nothing.
+
+| Posting says | Result |
+|---|---|
+| Remote or based only in countries you cannot work from (`Remote Spain`, `London`, `Home based - EMEA`) | dropped |
+| Anywhere, your region or country (`Home based - Worldwide`, `Remote - Americas`, `Remote - Mexico`) | kept |
+| On-site or hybrid in a country you may work in but do not live in (`New York, NY`) | dropped, unless `willing_to_relocate: true` |
+| Remote, tied to a country you may work in (`Remote - US`) | kept, or dropped with `remote_authorized: drop` |
+| On-site or hybrid in another city of your own country (`Hybrid - Mexico City`) | dropped unless it is your city; a bare `Mexico City` (no mode stated) is kept |
+| `Hybrid` / `In-Office` with no place named | dropped (you would have to be there, and nothing says where) |
+| A bare `Remote`, `Distributed`, an unknown city or empty | kept: the fit check judges it |
+| The text says you must live in the United States / Germany / ... and names no place you live | dropped, unless the text also names your country |
+
+It only drops what it is sure about, and a bug in it keeps the posting rather than stopping a cycle. The daemon prints the
+number dropped and a few examples each cycle (`[Stage 2]   not for you: ...`), and the dashboard shows the count. `willing_to_relocate`
+left empty counts as "not stated", which is treated like no. If it wrongly drops a place you do want, add a word from the
+location to `always_keep`. Postings the filter keeps still go through the fit check, which has the last say.
+
 > `stage1.blocklist`, `stage1.robots_respect` and `stage1.sandbox` belong to the experimental
 > `stage1_generate/` scraper generator. The daemon's own ingestion does not read them.
 
@@ -208,6 +250,68 @@ llm:
   timeout_seconds: 60
 ```
 
+### Using more than one model (optional)
+
+By default one model does every job. If you have several models installed you can give each job to the one that is
+best at it. This is a `models:` block in `config.yaml`, commented out in the shipped file:
+
+```yaml
+models:
+  roles:                                  # a role = a model, plus any overrides of the llm block above
+    judge: {model: "qwen2.5:7b"}
+    pilot: {model: "qwen2.5-coder:7b", context_tokens: 4096}
+  tasks:                                  # which role does which job
+    fit: judge
+    questions: judge
+    agent: [judge, pilot]                 # one vote per entry, in turn
+```
+
+| Task | What the model does | Notes |
+|---|---|---|
+| `fit` | judges a posting against you | needs reading and judgement |
+| `questions` | maps a form question to your facts | strict JSON; abstaining is the right answer when the facts do not say |
+| `essay` | drafts a free-text answer (`answers.open_ended: generate`) | only used when you turn that on |
+| `agent` | chooses between buttons on an unfamiliar page | a list of roles: vote *k* is cast by role *k* in menu order *k*, and the votes must still all agree |
+
+A task you do not list uses the `llm` block, so you can adopt this one job at a time.
+
+What happens when something is missing:
+
+- At startup the daemon checks every role that a task uses and prints a `[Daemon] Models:` line for each. A role
+  whose model is not installed is not used; its tasks use the `llm` model instead.
+- If a role's model fails while running (not loaded, out of memory, prompt too big for its window), that one request
+  is retried on the `llm` model. Adding a model therefore cannot leave a job worse off than before it existed.
+- Fit verdicts are cached per model, so changing the `fit` model re-judges postings instead of reusing old verdicts.
+- **A model that keeps failing is left alone.** After two requests in a row that get no answer at all (Ollama
+  restarting, out of memory, swapped out), that model is not asked again for two minutes: callers fail at once instead
+  of waiting out a timeout per job, and a role goes straight to the `llm` model. After the cool-down one trial request
+  goes through; success resumes normal use. A reply that is merely bad (broken JSON) does not count. The daemon log says
+  `[LLM] model '…' did not answer 2 requests in a row` once per outage, and `is answering again` when it recovers.
+  Tune with `llm.breaker: {failures: 2, cooldown_seconds: 120}`; `breaker: false` turns it off.
+- **A role can ask for free RAM.** `min_free_ram_gb: 5.5` on a role (for a big model that spills into system RAM) means
+  it is used only while that much RAM is available, or if it is already loaded; otherwise its work goes to the `llm`
+  model and the log says so now and then. An unreadable RAM figure never blocks a role.
+- **The `fit_review` task** (`tasks: fit_review: heavy`) names the model that gives a second opinion on a deal-breaker
+  veto ([section 7.4](#74-fit-vetoes-check-what-the-models-skipped)). It must be a different model from `fit`'s; with no
+  `fit_review` role, or the same model, there is no second opinion. If that role cannot be used right now (model down,
+  or short of the RAM `min_free_ram_gb` asks for) the veto is postponed, never confirmed by the judge alone.
+- **An outage never costs a job its attempts.** With `fit.on_llm_error: skip`, a job whose fit could not be checked is
+  skipped for now and tried again next cycle without using up one of its `max_attempts`, however long the outage lasts.
+
+Things to know when you add models:
+
+- **Context size.** Ollama's OpenAI endpoint cannot set the window per request. Bake it into the model with a
+  Modelfile (`PARAMETER num_ctx 4096`) and put the same number in the role's `context_tokens`.
+- **Importing a model file into Ollama** (`ollama create name -f Modelfile` with `FROM path\to\model.gguf`) does not
+  always pick up the chat format. Check `ollama show name --modelfile`: if it says `TEMPLATE {{ .Prompt }}`, the model
+  would receive your system and user text without role markers and answer badly. Copy the `TEMPLATE` of a model of
+  the same family (`ollama show qwen2.5:7b --modelfile`) into your Modelfile.
+- **Swapping costs time.** Ollama loads and unloads models on demand. Two models that do not fit in VRAM together
+  take 10 to 30 seconds to swap, so give a single model as many of the jobs as you can.
+- **Measure before you trust.** General-purpose and code-tuned models fail differently: one may refuse to act, another
+  may answer confidently and wrongly, a third may break the JSON format on long answers. Try a role on your own
+  postings and forms before giving it a job where a wrong answer costs something.
+
 ### Fit check, answers and the agent
 
 ```yaml
@@ -215,7 +319,7 @@ fit:
   enabled: true
   min_score: 0.5                # below this the job is skipped for good
   deal_breakers_veto: true
-  on_llm_error: "allow"         # "allow": apply anyway if the model is down | "skip"
+  on_llm_error: "skip"          # "skip": never apply unchecked; the job is retried next cycle | "allow": apply anyway if the model is down
 
 answers:
   enabled: true
@@ -346,6 +450,33 @@ How outcomes are recorded:
 | `skipped` | CAPTCHA, login wall, closed posting, or a poor fit. Closed and not-a-fit are permanent |
 | `duplicate` | The site says it was already applied to |
 
+### 7.4 Fit vetoes: check what the models skipped
+
+A "deal-breaker" the model quotes from a posting is the one fit verdict that overrides a good score, and small models
+sometimes get it wrong (a posting says "US work authorization required" and the model decides you lack it, although
+your facts say you have it). A veto is therefore checked three ways before it is final:
+
+1. **Your own facts.** If the quote is already answered by `facts.yaml` (it asks for work authorization in a country you
+   are authorized in, or names the city you live in) the veto is dropped by code. Citizenship, clearances, residence
+   and relocation are never waived this way. If `requires_sponsorship` is unstated (`null`), a quote that mentions
+   sponsorship is not waived: whether you need sponsorship is your decision, not an assumption.
+2. **A second model.** With a `fit_review` role configured (see "Using more than one model") and a veto that
+   overrides a good score (the fit score alone would have applied), a *different* model judges the posting on its own,
+   without being told what the first said. If it also skips, the skip is final. If it would apply, **nothing is skipped
+   or applied**: the job is parked (`needs_review`, code `fit_disagreement`). If it cannot be asked right now, the skip
+   is postponed and tried again next cycle without using up one of the job's attempts.
+3. **You.** Whatever the models said:
+
+```powershell
+python fit_review.py list             # every veto and disagreement, newest first
+python fit_review.py show <job>       # the models' reasoning: score, the quoted deal-breakers, the second opinion
+python fit_review.py approve <job>    # apply to it after all (queued again; no model can veto it)
+python fit_review.py reject <job>     # skip it for good (no model is asked again)
+```
+
+The first few characters of the job id are enough. The dashboard's `v` key lists the same postings, disagreements first.
+Switch the second opinion off with `fit.second_opinion: false`.
+
 ## 8. Running it as a service
 
 `setup.bat` is the Windows launcher (it runs `setup.ps1`). With no arguments it shows an interactive menu;
@@ -409,10 +540,51 @@ Metrics pipeline built from this project's components. The Applier component def
 The components import this project's modules, so Langflow must be able to find the folder. Start it from the project
 folder (the default), or set `AUTO_APPLIER_HOME` to the project's path first.
 
+### Terminal dashboard
+
+```powershell
+tui.bat
+```
+
+The first run creates a small environment (`.venv-tui`, a few MB: Textual and PyYAML) and then opens the dashboard.
+Textual lives in its own environment on purpose: installing it into the main one would upgrade `rich` and could break
+Langflow. Open it in a second terminal window; it can stay open next to the daemon.
+
+It is **read-only**. It reads `state.db` (opened read-only), `daemon.log`, the per-job folders under `applications/`
+and asks Ollama which models are loaded; it never writes and never touches the daemon.
+
+| Panel | Shows |
+|---|---|
+| Top line | whether the daemon is running (checked from its lock and process, never by signalling it), which models Ollama has loaded and how much GPU memory they use, the mode, and when the next cycle starts |
+| Today | submissions in the last 24 hours against `stage3.rate_limit.global_per_day`, today's outcomes, all-time totals and a 7-day sparkline |
+| Latest cycle | the funnel: scraped, what each filter removed, what reached stage 3, and what happened to it |
+| Models | what is loaded now, and each configured role (`models:`) with whether its model is loaded and which tasks use it |
+| Now | the job being worked on: `open ▸ fit 84% ✓ ▸ click "Apply" ▸ fill form ▸ click "Next" …`, a **◆** marking a step chosen by a model, and the reason for the latest step |
+| Recent applications | newest first; **↑↓ and Enter** open a job: outcome, fit verdict and summary, answers by source, and a table of every agent step with who decided it and why |
+| Needs you | questions waiting for an answer (`python answers.py pending`) and each site's trust state (`✓` trusted, `n/m` clean runs toward trust) |
+
+Keys: `Enter` open the selected job, `Esc` back, `o` open that step's screenshot, `f` open the job's folder, `l` the
+daemon log, `v` the fit decisions, `r` refresh now, `q` quit. It refreshes every two seconds.
+
+`v` lists every posting skipped for fit and every one parked because the models disagree, the ones that need you first,
+with the quoted deal-breaker and where it stands (`models disagree: your call`, `waiting for a 2nd opinion`,
+`veto confirmed`, `vetoed by one model`, `low fit score`). `a` / `x` copy the `fit_review.py approve|reject <job>`
+command for the selected row. A disagreement also appears in the "Needs you" panel on the main screen.
+
+Other ways to run it: `tui.bat --demo` shows made-up data (handy to see what it looks like before the daemon has run),
+`tui.bat --once` prints one text snapshot and exits (needs only `rich`, so `python -m tui --once` works in the main
+environment too), and `tui.bat --selftest` drives the dashboard headlessly and prints PASS/FAIL.
+
+If colours are missing, your shell has `NO_COLOR` set; unset it. If the dashboard says "daemon stopped" while you
+know it runs, it may be running as another user or in WSL (the process check only sees this Windows session).
+
 ## 10. Tuning for your hardware
 
-**Give the model a bigger context window.** Ollama defaults to 2048 tokens. If you have the VRAM (a 7B model at 8k
-context adds only about 0.5 GB), set both:
+**Give the model a bigger context window.** Ollama serves a small window by default (2048 tokens on the machine this was
+built on), and the daemon prints the real figure at startup (`The model server's context window is only N tokens`;
+prompts are then sized to the smaller of that and `llm.context_tokens`). Do not read it from `ollama ps`: its CONTEXT
+column shows what the *loaded instance* was started with, which can come from a request option rather than the server
+default. If you have the VRAM (a 7B model at 8k context adds only about 0.5 GB), raise both:
 
 ```powershell
 setx OLLAMA_CONTEXT_LENGTH 8192
@@ -426,9 +598,10 @@ Quality drops, and the guards stay the same: the model can only choose from vett
 be grounded in `facts.yaml`. You can also lower `agent.consensus` to `1` (fewer model calls on ambiguous pages;
 less safe) or set `fit.enabled: false` to skip the fit check.
 
-**No model at all.** Features that need it degrade rather than guess: the fit check is skipped
-(`fit.on_llm_error: allow`), the agent stops on ambiguous pages, and questions it cannot answer from the facts park
-the job.
+**No model at all.** Features that need it degrade rather than guess: with `fit.on_llm_error: skip` a job whose fit
+cannot be checked is not applied to and is tried again on a later cycle (with `allow` it is applied to unchecked, which
+is only sensible if you run without a model on purpose), the agent stops on ambiguous pages, and questions it cannot
+answer from the facts park the job.
 
 **Bigger machines.** A larger model improves the fit check; avoid models too big for your VRAM, because spilling
 into system RAM slows each call dramatically.
@@ -458,7 +631,7 @@ python -m pytest tests -q
 python run_tests.py
 ```
 
-The suite (187 tests) includes real-browser tests against a fake application server. It takes a few minutes.
+The suite (248 tests with pytest; `run_tests.py` runs 247, skipping the one that needs the dashboard environment) includes real-browser tests against a fake application server. It takes a few minutes.
 Tests that need a Playwright browser are skipped if none is installed. The suite is built around local fake
 servers and stubbed models, so it does not need Ollama or an internet connection.
 

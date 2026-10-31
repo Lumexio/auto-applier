@@ -208,6 +208,14 @@ CREATE TABLE IF NOT EXISTS site_clean_runs (
     PRIMARY KEY (site_key, job_id)
 );
 
+-- Your decision on a posting the fit models vetoed or disagreed about (python fit_review.py). It wins over the models from then on.
+CREATE TABLE IF NOT EXISTS fit_overrides (
+    job_id     TEXT PRIMARY KEY,
+    decision   TEXT NOT NULL CHECK (decision IN ('apply','skip')),
+    note       TEXT,
+    decided_at TEXT NOT NULL
+);
+
 -- Useful views
 CREATE VIEW IF NOT EXISTS v_daily_application_count AS
 SELECT substr(submitted_at, 1, 10) AS day, COUNT(*) AS submitted

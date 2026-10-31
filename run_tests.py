@@ -305,6 +305,11 @@ def main():
         ("Confirmation, Hooks & Stage 3 Flow", "test_p2_flow"),
         ("Site Trust & Probation", "test_p3_trust"),
         ("Dynamic Application Agent", "test_p3_agent"),
+        ("Model Roles & Fallbacks", "test_p4_models"),
+        ("Model Outages & Memory", "test_p4_outages"),
+        ("Fit Veto Review", "test_p5_fit_review"),
+        ("Terminal Dashboard (data and rendering)", "test_tui_data"),
+        ("Location Filter", "test_p6_location"),
     ):
         print(f"\n[Suite: P2 {title}]")
         mod = __import__(f"tests.{module}", fromlist=[module])

@@ -48,6 +48,7 @@ __pycache__/
 .coverage
 htmlcov/
 .venv/
+.venv-tui/
 venv/
 env/
 *.egg-info/

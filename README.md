@@ -7,7 +7,7 @@ until you stop it or shut the PC down.
 There is no cloud AI behind it. The language model is a small open model (default: `qwen2.5:7b`) served locally
 by [Ollama](https://ollama.com), and everything that matters for safety is decided by ordinary code, not by the model.
 
-> **Status:** active development. The pipeline, the answer engine and the safety rails are covered by 187
+> **Status:** active development. The pipeline, the answer engine and the safety rails are covered by 248
 > automated tests, but a brand-new install has no application history, so **every kind of site starts on
 > probation** (filled in and reviewed, not submitted) until you approve it. See [Safety model](#safety-model).
 > Setup instructions are in **[SETUP.md](SETUP.md)**.
@@ -50,8 +50,9 @@ This project takes the opposite approach:
 1. **Stage 1: ingestion.** Public Greenhouse and Lever boards are read through their APIs; LinkedIn and Handshake
    are read through a real browser that reuses your logged-in session.
 2. **Stage 2: filtering.** Cheap, explainable rules: duplicates, stale postings, scam phrases, your excluded
-   companies and keywords, minimum salary, title relevance (field and seniority) and a skill-match score. No model
-   is needed here. (Location and work authorization are not hard filters: the fit check in stage 3 weighs them.)
+   companies and keywords, minimum salary, title relevance (field and seniority), a skill-match score and a
+   **location filter** that drops postings you could not take up (remote only in other countries, on-site where you
+   do not live, "must reside in X"). No model is needed here; what it is unsure about it keeps for the fit check.
 3. **Stage 3: applying.** For the few jobs that survive (at most the daily cap), a local-model **fit check** reads
    the real posting text, the form is opened and filled, and the result is verified against what the page says.
 
@@ -64,10 +65,20 @@ This project takes the opposite approach:
 ### Filtering and fit
 - Hard filters: duplicates (across runs), jobs already applied to, expired postings, scam heuristics,
   company/keyword exclusions, salary floor, title relevance (your field and seniority) and a skill-match score.
+- **Location filter** (`stage2.location`), driven by your `facts.yaml`: where you live, which countries you may work in
+  and whether you would relocate. It drops "Remote - Spain", "London" or "Austin, TX (Hybrid)" and postings whose text
+  says "must reside in the United States" before any model reads them, and keeps anything it cannot read (a bare
+  "Remote", an unknown city) for the fit check. Every cycle's log lists a few drops so a wrong one is easy to spot.
 - **Model-based fit scoring** on the actual posting text, cached per posting/profile/model. It judges what the
   cheap rules cannot, such as location, remote policy and work authorization, against your facts. A "deal-breaker" only
   vetoes a job if the model can quote it **verbatim** from the posting, so a small model cannot invent a reason
   to skip a job.
+- **Vetoes are double-checked before they are final.** A deal-breaker is the one verdict that overrides a good score,
+  and small models get it wrong (for example vetoing "US work authorization required" for someone who has it). So code
+  first waives any veto your own facts already answer; then, if a `fit_review` model is configured, a *different* model
+  judges the posting independently: both skip, the skip is final; it would apply, the job is parked for you rather
+  than skipped or applied to. `python fit_review.py list` (or the dashboard's `v` key) shows every veto and lets you
+  overturn it.
 
 ### Answering application questions
 - Answers come only from **`facts.yaml`** (a file you own and edit), your contact details in `profile.json`, and
@@ -88,6 +99,13 @@ This project takes the opposite approach:
   orders; if its answer changes with the order it is guessing and the agent stops instead of acting.
 - Every run leaves a **step-by-step trace with a screenshot per step** in `applications/<job>/trace/`.
 
+### Several local models (optional)
+- One model by default; with a `models:` block in `config.yaml` each job (judging fit, mapping form questions,
+  drafting essays, choosing buttons) can go to the installed model that is best at it.
+- The agent's votes can come from different models, and they must all agree, so one model's blind spot cannot decide
+  alone.
+- A missing or failing model never leaves a job worse off: its work falls back to the main model.
+
 ### Safety and reliability
 - **Probation per site type**: a new ATS platform or company domain is filled in and reviewed, never submitted,
   until you approve it, it completes a few clean runs, or one application there is confirmed.
@@ -101,6 +119,10 @@ This project takes the opposite approach:
 - **Audit trail**: SQLite database of runs, attempts and events, plus a per-job folder of screenshots and answers.
 
 ### Interfaces
+- **Terminal dashboard** (`tui.bat`): at-a-glance numbers (submitted today and against the daily cap, outcomes, the
+  latest cycle's funnel, which models are loaded), the job being worked on right now with its step-by-step agent flow,
+  recent applications you can open to see the fit verdict, answers and every step with who decided it, plus questions
+  waiting for you and the trust state of each site. Read-only: it only watches what the daemon writes.
 - **CLI** for the daemon, answers and site trust.
 - **Local REST API** (loopback only, bearer-token protected) for profile, status, scrape/filter/apply.
 - **Langflow** visual pipeline (optional) with ready-made components.
@@ -172,6 +194,8 @@ Then run it for real, either `python daemon.py` or `setup.bat -All -Background`.
 | `python answers.py pending` | Required questions that blocked applications |
 | `python answers.py set "<question>" "<answer>" --requeue` | Answer once for all future applications |
 | `python sites.py list` / `approve <site>` / `revoke <site>` | Manage which sites may be submitted to |
+| `python fit_review.py list` / `show` / `approve <job>` / `reject <job>` | See postings the models vetoed or disagreed about, and overrule them |
+| `tui.bat` | Live terminal dashboard (`--demo` for made-up data, `--once` to print a text snapshot) |
 | `python api.py --port 8000` | Local REST API |
 | `setup.bat -Status` | Show daemon / API / Langflow state |
 | `python -m pytest tests -q` | Run the test suite |
@@ -189,7 +213,9 @@ Then run it for real, either `python daemon.py` or `setup.bat -All -Background`.
 | `form_questions.py`, `answerer.py`, `facts.py`, `answers.py` | Reading form fields and answering from your facts |
 | `fit.py`, `llm_client.py` | Model-based fit scoring and the local-model client |
 | `state.py`, `schema.sql`, `sites.py` | SQLite state, migrations, site trust (probation) |
+| `fit.py`, `fit_review.py` | Model fit scoring (facts check, second opinion) and the command to overrule it |
 | `api.py` | Local REST API |
+| `tui/`, `tui.bat` | Read-only terminal dashboard (data and rendering use only the standard library and `rich`; the Textual app runs in its own `.venv-tui`) |
 | `langflow_components.py`, `run_langflow.py`, `auto_applier_flow.json` | Optional visual pipeline |
 | `outreach.py` | Recruiter outreach (disabled by default) |
 | `stage1_generate/` | Experimental sandboxed scraper-code generator (not part of the daemon loop) |

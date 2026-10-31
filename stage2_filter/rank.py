@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from facts import load_facts
+
 from .dedupe import dedupe
 from .filters import is_excluded, is_expired, is_scam, salary_ok
+from .location import DEFAULT_LOCATION_CFG, candidate_from, location_verdict
 from .normalize import normalize_job
 from .relevance import score_with_reason, title_relevance
+
+MAX_LOCATION_EXAMPLES = 25      # how many dropped postings (and why) a run remembers, so a wrong drop can be spotted in the log
 
 
 @dataclass
@@ -26,6 +31,7 @@ class Diagnostics:
     removed_scam: int = 0
     removed_relevance: int = 0
     truncated_by_cap: int = 0
+    location_examples: list[str] = field(default_factory=list)
 
 
 def score_job(job: dict[str, Any], profile: dict[str, Any]) -> float:
@@ -40,16 +46,29 @@ def _artifact_path(state: Any) -> Path:
     return Path("jobs.json")
 
 
+def _facts_for(cfg: dict[str, Any]) -> dict[str, Any]:
+    path = (cfg.get("paths") or {}).get("facts", "facts.yaml")
+    try:
+        return load_facts(path)
+    except Exception as e:                       # malformed YAML must not take the daemon down
+        print(f"[Stage 2] Could not read {path}: {e}. The location filter falls back to profile.json.")
+        return {}
+
+
 def stage2_run(
     raw_jobs: list[dict[str, Any]],
     profile: dict[str, Any],
     state: Any = None,
     run_id: int | None = None,
     config: dict[str, Any] | None = None,
+    facts: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], Diagnostics]:
     diag = Diagnostics(total_scraped=len(raw_jobs))
     cfg = config or {}
     stage2_cfg = cfg.get("stage2", {})
+    location_cfg = {**DEFAULT_LOCATION_CFG, **(stage2_cfg.get("location") or {})}
+    # Where you live and may work: facts.yaml first, profile.json as the fallback. Unknown => the filter does nothing.
+    candidate = candidate_from(facts if facts is not None else _facts_for(cfg), profile) if location_cfg["enabled"] else None
     safety_factor = stage2_cfg.get("safety_factor", 1.2)
     scam_heuristics = stage2_cfg.get("scam_heuristics")
     # A posting with real text must match at least this much of the profile; card-only postings (title and
@@ -87,6 +106,13 @@ def stage2_run(
         relevant, _why = title_relevance(job, profile)
         if not relevant:
             diag.removed_relevance += 1
+            continue
+
+        why_not_here = location_verdict(job, candidate, location_cfg)
+        if why_not_here:
+            diag.removed_location += 1
+            if len(diag.location_examples) < MAX_LOCATION_EXAMPLES:
+                diag.location_examples.append(f"{job['title']} @ {job['company']} [{job.get('location') or '-'}]: {why_not_here}")
             continue
 
         # Already applied to, awaiting manual review, or out of retries: never queue it again

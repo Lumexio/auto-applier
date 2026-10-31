@@ -12,6 +12,7 @@ from typing import Any, Callable
 from answerer import DEFAULT_ANSWERS_CFG, QuestionSolver
 from facts import load_facts
 from fit import DEFAULT_FIT_CFG, FitScorer, build_fit_gate
+from llm_client import build_llm_cfg
 from form_questions import EXTRACT_JS
 from sites import DEFAULT_PROBATION, site_fingerprint
 
@@ -20,6 +21,7 @@ from .ats_handlers import (
     CaptchaEncountered,
     DuplicateApplication,
     FallbackHandler,
+    FitDisputed,
     LoginRequired,
     NeedsHumanInput,
     NotAFit,
@@ -545,7 +547,7 @@ def stage3_run(
     )
     limited_domains: set[str] = set()
 
-    llm_cfg = cfg.get("llm", {})
+    llm_cfg = build_llm_cfg(cfg)                       # the `llm` block plus the optional `models:` roles; each component picks its own model from it
     answers_cfg = {**DEFAULT_ANSWERS_CFG, **cfg.get("answers", {})}
     fit_cfg = {**DEFAULT_FIT_CFG, **cfg.get("fit", {})}
     confirm_timeout = int(stage3_cfg.get("confirmation_timeout_seconds", 20))
@@ -722,10 +724,20 @@ def stage3_run(
                 except NotAFit as e:
                     print(f"[Stage 3] Skipping {job['title']} @ {job['company']}: {e.summary}")
                     if tx:
-                        # error_code makes this skip permanent (a CAPTCHA skip, which has none, stays retryable)
-                        tx.mark("skipped", ats=handler.name, error=e.summary[:300], error_code="not_a_fit")
+                        # error_code makes this skip permanent (a CAPTCHA skip, which has none, stays retryable). A verdict is
+                        # permanent; "the model could not be asked" is not a verdict, so that one is tried again next cycle.
+                        unassessed = e.details.get("error") in ("llm_error", "review_unavailable")
+                        tx.mark("skipped", ats=handler.name, error=e.summary[:300], **({} if unassessed else {"error_code": "not_a_fit"}))
+                        if unassessed:
+                            tx.refund_attempt()           # not the job's fault: a long outage must not block it for good
                     elif state:
                         state.log_event("INFO", "stage3", "dry_run_not_a_fit", json.dumps(e.details)[:2000], run_id=run_id, job_id=job_id)
+                except FitDisputed as e:
+                    print(f"[Stage 3] Parked {job['title']} @ {job['company']}: {e.summary}. Decide with: python fit_review.py list")
+                    if tx:
+                        tx.mark("needs_review", ats=handler.name, error=e.summary[:300], error_code="fit_disagreement")   # blocks retries until you decide
+                    elif state:
+                        state.log_event("INFO", "stage3", "dry_run_fit_disputed", json.dumps(e.details)[:2000], run_id=run_id, job_id=job_id)
                 except NeedsHumanInput as e:
                     print(f"[Stage 3] {job['title']} @ {job['company']}: {e}. Parked; see: python answers.py pending")
                     if state:

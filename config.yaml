@@ -26,14 +26,60 @@ llm:
   model: "qwen2.5:7b"
   temperature: 0.1
   max_tokens: 4096
-  timeout_seconds: 60                      # a cold 7B model needs far longer than the old 5s
-  context_tokens: 2048                     # prompt budget. Ollama's default window is 2048; raise BOTH this and the
-                                           # server (set OLLAMA_CONTEXT_LENGTH=8192) for longer postings / more questions
+  timeout_seconds: 120                     # a cold load takes 30+ s, longer when another model must be swapped out first
+  # breaker: {failures: 2, cooldown_seconds: 120}   # on by default: a model that fails twice in a row is left alone for 2 minutes
+  #                                                 # (callers fail at once instead of waiting out a timeout each); false turns it off
+  context_tokens: 2048                     # prompt budget. This Ollama serves qwen2.5:7b with a 2048-token window (the daemon measures it at
+                                           # startup and logs it). Raise BOTH this and the server (OLLAMA_CONTEXT_LENGTH=4096) for more
+
+# Optional: use more than one local model. Without this block every job below uses the `llm` model above.
+# A ROLE is a model plus any overrides of the `llm` block (endpoint, context_tokens, timeout_seconds ...); a TASK is a
+# job the program asks a model to do. The jobs:
+#   fit        judge a posting against you                (needs reading and judgement)
+#   questions  map a form question to your facts          (strict JSON; abstaining is correct when the facts do not say)
+#   essay      draft a free-text answer (answers.open_ended: generate)
+#   fit_review a DIFFERENT model's independent second opinion on a deal-breaker veto (fit.second_opinion); never the same model as `fit`
+#   agent      choose between buttons on an unfamiliar page; give a LIST of roles and each vote is cast by the next one,
+#              so the votes must agree across models, not just across menu orders (agent.consensus = number of votes)
+# A role whose model is not installed is reported at startup and its tasks use the `llm` model instead; so does a role
+# whose model fails while running. Set each role's context_tokens to the model's num_ctx (bake it in with a Modelfile
+# `PARAMETER num_ctx`: Ollama's OpenAI endpoint cannot set it per request).
+#
+# Example (measured on an 8 GB GPU; check it on your own postings and forms): a general instruct model judges and answers,
+# two differently-trained code models take turns voting on unfamiliar pages. Small models differ a lot in what they get
+# wrong: in that test the general 7B never clicked a wrong button but gave up on 12 of 28 pages, one code model
+# clicked wrong twice, and the two together were right on 23, gave up on 4 and clicked wrong once.
+#
+# Switched on here with the models installed on this machine (imported from GGUF files; see SETUP.md). If one is missing
+# the startup log says so and its tasks use the `llm` model; remove this block to go back to a single model.
+models:
+  roles:
+    judge: {model: "qwen2.5:7b"}               # same model as `llm`, so it shares the window the daemon measures at startup
+    pilot: {model: "qwen2.5-coder-7b-local", context_tokens: 4096, timeout_seconds: 120}
+    # big: part of it runs on the CPU and needs ~5 GB of RAM, so it is used only while at least 5.5 GB is available (or it is
+    # already loaded); otherwise its votes go to the main model
+    heavy: {model: "deepseek-coder-v2-lite-local", context_tokens: 4096, timeout_seconds: 180, min_free_ram_gb: 5.5}
+  tasks:
+    fit: judge
+    questions: judge
+    agent: [pilot, heavy]
+    fit_review: heavy      # a DIFFERENT model double-checks a deal-breaker that overrides a good score (python fit_review.py)
 
 stage1:
   target_urls:
     - "https://www.linkedin.com/jobs/"
     - "https://app.joinhandshake.com/job-search/"
+    # Company job boards (public Greenhouse / Lever APIs: no login, no browser). Chosen on 2026-10-31 because each had engineering
+    # roles open to remote candidates in the Americas (named Latin America / the Americas / worldwide, or a bare "Remote"). Greenhouse is a trusted
+    # site, so a posting that passes the fit gate on these is submitted; Lever is still on probation (filled in, not submitted).
+    # The stage2.location filter below removes the postings on these boards that are tied to other countries.
+    - "https://boards.greenhouse.io/dropbox"
+    - "https://boards.greenhouse.io/canonical"
+    - "https://boards.greenhouse.io/circleci"
+    - "https://boards.greenhouse.io/clara"
+    - "https://boards.greenhouse.io/planetscale"
+    - "https://boards.greenhouse.io/turing"
+    - "https://jobs.lever.co/kavak"
   max_pages: 10
   use_headless_browser_when_needed: true
   blocklist:
@@ -54,14 +100,26 @@ stage1:
 stage2:
   profile_path: "profile.json"
   safety_factor: 1.2
-  stale_posting_days: 30
-  min_score: 0.25                # postings with a real description must match >= ~2 profile skills
+  stale_posting_days: 90         # counted from the date first published; company boards keep roles open for months (30 dropped 83% of seven boards)
+  min_score: 0.25               # postings with a real description must match >= ~2 profile skills
   min_description_chars: 200     # shorter text (LinkedIn/Handshake cards) is judged by the title gate alone
   scam_heuristics:
     - "wire transfer"
     - "pay for training"
     - "commission only"
     - "send money"
+  # Drop postings you could not take up, before any model reads them. Where you live, what you are authorized in and whether you
+  # would relocate come from facts.yaml (location.country / city / willing_to_relocate, work_authorization.authorized_countries),
+  # profile.json is the fallback. It only drops what it is sure about: an unreadable location, a bare "Remote" or a requirement
+  # naming a place it does not know are all kept for the fit model. Each cycle's log lists a few drops, so a wrong one is easy to see.
+  #   dropped: remote or on-site only in other countries ("Remote - Spain", "London"); on-site or hybrid where you do not live
+  #            (willing_to_relocate must be true in facts.yaml to keep the ones in a country you may work in); bare "Hybrid";
+  #            and postings whose text says outright that you must live somewhere you do not
+  location:
+    enabled: true
+    remote_authorized: keep      # "Remote - US" when you may work there but live elsewhere: keep (the fit model judges) | drop
+    check_description: true      # read "must reside in the United States" style sentences in the posting text
+    always_keep: []              # words that keep a posting whatever its location says, e.g. ["lisbon"]
 
 stage3:
   mode: "autonomous"     # autonomous | assisted | dry_run
@@ -107,8 +165,10 @@ fit:
   enabled: true
   min_score: 0.5                 # 0..1; below this the job is skipped for good
   deal_breakers_veto: true       # a deal-breaker the model can quote verbatim from the posting skips it
-  on_llm_error: "allow"          # "allow": apply anyway when the model is unreachable | "skip"
+  on_llm_error: "skip"           # "skip": never apply unchecked; the job is tried again next cycle | "allow": apply anyway when the model is unreachable
   min_posting_chars: 300         # less posting text than this and there is nothing to judge
+  second_opinion: true           # a deal-breaker that overrides a good score must be confirmed by the `fit_review` model (see models:), or the job
+                                 # is parked for you; your own facts waive vetoes they already answer. Decide with: python fit_review.py list
 
 outreach:
   enabled: false         # OFF until recruiter detection/status handling is fixed (it mis-reported every attempt as already_connected)

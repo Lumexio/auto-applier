@@ -22,7 +22,7 @@ from typing import Any, Callable
 
 from facts import get_path, merged_view, render_lines
 from form_questions import Question, match_option, parse_questions
-from llm_client import LLMError, chat_json, context_budget, estimate_tokens
+from llm_client import LLMError, chat_json, context_budget, estimate_tokens, for_task
 from stage2_filter.relevance import skill_in
 
 DEFAULT_ANSWERS_CFG = {
@@ -74,6 +74,7 @@ class AnswerContext:
     cfg: dict[str, Any] = field(default_factory=dict)
     job: dict[str, Any] = field(default_factory=dict)
     bank_get: Callable[[str], str | None] | None = None
+    essay_cfg: dict[str, Any] = field(default_factory=dict)      # the model that drafts free-text answers; empty = use llm_cfg
 
     def setting(self, name: str) -> Any:
         return self.cfg.get(name, DEFAULT_ANSWERS_CFG[name])
@@ -431,7 +432,7 @@ def _generate_open_ended(q: Question, ctx: AnswerContext) -> Answer | Blocked:
     job = f"{ctx.job.get('title', '')} at {ctx.job.get('company', '')}"[:120]
     user = f"NARRATIVE:\n{narrative_lines}\n\nFACTS:\n{lines}\n\nJOB: {job}\n\nQUESTION: {q.label[:300]}"
     try:
-        text = str(chat_json(ctx.llm_cfg, _OPEN_SYSTEM, user, max_tokens=220, temperature=0.2).get("answer") or "").strip()
+        text = str(chat_json(ctx.essay_cfg or ctx.llm_cfg, _OPEN_SYSTEM, user, max_tokens=220, temperature=0.2).get("answer") or "").strip()
     except LLMError as e:
         return Blocked(f"model unavailable for an open-ended answer ({e})")
     limit = min(q.maxlength or 1200, 1200)
@@ -526,7 +527,8 @@ class QuestionSolver:
     ) -> None:
         self.profile = profile
         self.facts = facts or {}
-        self.llm_cfg = llm_cfg or {}
+        self.llm_cfg = for_task(llm_cfg, "questions")    # maps form questions to facts
+        self.essay_cfg = for_task(llm_cfg, "essay")      # drafts free-text answers (only when answers.open_ended is "generate")
         self.cfg = answers_cfg or {}
         self.bank_get = bank_get
         self.audit_dir: Path | None = None
@@ -548,7 +550,7 @@ class QuestionSolver:
             report.notes.append(f"could not read the form ({type(e).__name__})")
             return report
 
-        ctx = AnswerContext(self.profile, self.facts, self.llm_cfg, self.cfg, job or {}, self.bank_get)
+        ctx = AnswerContext(self.profile, self.facts, self.llm_cfg, self.cfg, job or {}, self.bank_get, essay_cfg=self.essay_cfg)
         plan = plan_answers(questions, ctx)
         by_id = {q.id: q for q in questions}
 

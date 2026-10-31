@@ -21,7 +21,7 @@ from stage2_filter.rank import stage2_run
 from stage3_apply.run import stage3_run
 from state import StateStore
 from import_profile import sync_system_firefox_profile
-from llm_client import check_health, detect_context_tokens
+from llm_client import check_health, detect_context_tokens, probe_roles
 
 
 def load_yaml_config(path: str = "config.yaml") -> dict[str, Any]:
@@ -138,6 +138,8 @@ class Daemon:
                     "postings and forms get trimmed; set OLLAMA_CONTEXT_LENGTH=8192 and llm.context_tokens: 8192 for better results."
                 )
             print(f"[Daemon] LLM prompts are budgeted at {llm_cfg['effective_context_tokens']} tokens.")
+        for line in probe_roles(self.config):                  # the optional `models:` block: which roles can be used
+            print(f"[Daemon] Models: {line}")
         return ok
 
     def install_signals(self) -> None:
@@ -258,8 +260,10 @@ class Daemon:
                 raw_jobs, profile, state=self.state, run_id=run_id, config=self.config
             )
             print(
-                f"[Stage 2] Filtering complete. {len(filtered_jobs)} qualified jobs (filtered: {diagnostics.removed_exclusions} exclusions, {diagnostics.removed_duplicates} duplicates, {diagnostics.removed_scam} scams)."
+                f"[Stage 2] Filtering complete. {len(filtered_jobs)} qualified jobs (filtered: {diagnostics.removed_exclusions} exclusions, {diagnostics.removed_duplicates} duplicates, {diagnostics.removed_scam} scams, {diagnostics.removed_location} by location)."
             )
+            for example in diagnostics.location_examples[:6]:       # a few, so a wrong drop shows up in the log
+                print(f"[Stage 2]   not for you: {example}")
 
             # Stage 3: Autonomous Application
             self.state.heartbeat()
