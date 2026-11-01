@@ -27,7 +27,7 @@ from typing import Any
 from stage2_filter.relevance import skill_in
 
 DEFAULT_SOURCE_CFG: dict[str, Any] = {
-    "sync_from": "../resume-template",
+    "sync_from": None,                    # the folder `python source.py sync` copies your resumes from; set it in config.local.yaml
     "experience": {
         "count": "jobs",                 # whose dates make up "years of experience": jobs | jobs_and_projects
         "undated_skills": "career",      # a listed technology no dated job names: career (= your job years) | off

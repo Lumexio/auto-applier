@@ -113,7 +113,7 @@ def candidate_block(profile: dict[str, Any], facts: dict[str, Any]) -> str:
     skills = ", ".join(str(s) for s in (profile.get("skills") or [])[:24])
     location = ", ".join(str(p) for p in (g("location.city"), g("location.region"), g("location.country")) if p) or profile.get("location", "")
     lines = [
-        f"seniority: {profile.get('seniority', 'unspecified')}",
+        f"seniority: {profile.get('seniority') or 'unspecified'}",
         f"skills: {skills}",
     ]
     if g("experience.total_years") is not None:

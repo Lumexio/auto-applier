@@ -105,9 +105,9 @@ def score_with_reason(job: dict[str, Any], profile: dict[str, Any]) -> tuple[flo
     skill_score = min(0.8, len(matched) / max(5, len(skills) * 0.3))
 
     # Title seniority boost: up to 0.2
-    seniority = str(profile.get("seniority", "senior")).lower()
+    seniority = str(profile.get("seniority", "senior") or "").lower()          # a profile that does not say (empty) earns no bonus for a level
     lowered = title.lower()
-    bonus = 0.2 if seniority in lowered or "lead" in lowered or "staff" in lowered else 0.0
+    bonus = 0.2 if (seniority and seniority in lowered) or "lead" in lowered or "staff" in lowered else 0.0
 
     reason = f"{len(matched)}/{len(skills)} skills"
     if matched:

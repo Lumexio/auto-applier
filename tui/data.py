@@ -109,8 +109,10 @@ def load_config(root: Path) -> dict[str, Any]:
     except ImportError:
         return {}
     try:
-        return yaml.safe_load((root / "config.yaml").read_text(encoding="utf-8")) or {}
-    except (OSError, ValueError, yaml.YAMLError):
+        from config_loader import load_config as load_merged            # stdlib + PyYAML only, like this module
+
+        return load_merged(root / "config.yaml")
+    except (ImportError, OSError, ValueError, yaml.YAMLError):
         return {}
 
 

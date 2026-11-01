@@ -7,7 +7,7 @@ until you stop it or shut the PC down.
 There is no cloud AI behind it. The language model is a small open model (default: `qwen2.5:7b`) served locally
 by [Ollama](https://ollama.com), and everything that matters for safety is decided by ordinary code, not by the model.
 
-> **Status:** active development. The pipeline, the answer engine and the safety rails are covered by 282
+> **Status:** active development. The pipeline, the answer engine and the safety rails are covered by 294
 > automated tests, but a brand-new install has no application history, so **every kind of site starts on
 > probation** (filled in and reviewed, not submitted) until you approve it. See [Safety model](#safety-model).
 > Setup instructions are in **[SETUP.md](SETUP.md)**.
@@ -179,7 +179,8 @@ Full instructions, including the files you must create first, are in **[SETUP.md
 python -m pip install -r requirements.txt
 python -m playwright install firefox chromium
 ollama pull qwen2.5:7b
-# create profile.json and facts.yaml (see SETUP.md), then:
+python profile_gen.py --resume my-resume.md --location "City, Country" --authorized XX --min-salary 60000 --seniority mid --remote yes
+python answers.py facts-init       # then fill in facts.yaml (see SETUP.md)
 python daemon.py --once --dry-run
 ```
 
@@ -228,6 +229,8 @@ Then run it for real, either `python daemon.py` or `setup.bat -All -Background`.
 | `fit.py`, `fit_review.py` | Model fit scoring (facts check, second opinion) and the command to overrule it |
 | `api.py` | Local REST API |
 | `tui/`, `tui.bat` | Read-only terminal dashboard (data and rendering use only the standard library and `rich`; the Textual app runs in its own `.venv-tui`) |
+| `profile_gen.py` | Builds `profile.json` from your resume; leaves empty whatever the resume does not state |
+| `config.yaml`, `config_loader.py` | The shared defaults, and the loader that merges your own `config.local.yaml` (never committed) over them |
 | `resume_facts.py`, `source.py` | Reads the resumes in `me/` and computes years per technology with provenance; the command to sync / show / check them |
 | `pending.py`, `desk.ps1` | The "what is waiting for you" screen, and the Windows Terminal layout that shows it with the dashboard and the daemon log |
 | `langflow_components.py`, `run_langflow.py`, `auto_applier_flow.json` | Optional visual pipeline |
@@ -241,7 +244,7 @@ Then run it for real, either `python daemon.py` or `setup.bat -All -Background`.
 
 - All processing is local. The only network traffic is to the job sites themselves (and a one-time model download).
 - These files contain personal data or live sessions; keep them private and out of version control:
-  `profile.json`, `facts.yaml`, `state.db*`, `applications/`, `.browser_profile/`, `.api_token`, `daemon.log`.
+  `profile.json`, `facts.yaml`, `config.local.yaml`, `me/`, `state.db*`, `applications/`, `.browser_profile/`, `.api_token`, `daemon.log`.
   The included `.gitignore` already excludes them (plus `jobs.json`, `*.pid` and other runtime output). If you
   ever staged them before adding it, unstage with `git rm -r --cached <path>`; if you already committed or pushed
   them, treat the browser session and API token as leaked and rotate them.
@@ -251,4 +254,8 @@ Then run it for real, either `python daemon.py` or `setup.bat -All -Background`.
 ## Documentation
 
 - **[SETUP.md](SETUP.md)** for installation, configuration, first run, running as a service, tuning and troubleshooting.
-- `config.yaml` is commented inline; every option is explained next to its value.
+- `config.yaml` is commented inline; every option is explained next to its value. Change settings in `config.local.yaml`, not in `config.yaml`.
+
+## License
+
+MIT, see [LICENSE](LICENSE). Use it, change it, share it; it comes with no warranty, and you are responsible for what it sends in your name.

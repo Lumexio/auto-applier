@@ -78,8 +78,11 @@ if (-not $isQuickOp) {
     # 4. Initialize Profile & Database
     Write-Host "`n[4/4] Verifying profile.json and state.db..." -ForegroundColor Yellow
     if (-not (Test-Path "profile.json")) {
-        Write-Host "Generating profile.json from resume-template source of truth..." -ForegroundColor Green
+        Write-Host "Generating profile.json from your resume..." -ForegroundColor Green
         python profile_gen.py
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "profile.json was not created. Point the generator at your resume: python profile_gen.py --resume <file or folder> (see SETUP.md, section 3)." -ForegroundColor Yellow
+        }
     } else {
         Write-Host "profile.json is present." -ForegroundColor Green
     }

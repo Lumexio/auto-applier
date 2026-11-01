@@ -140,14 +140,14 @@ availability:
 
 compensation:
   expected_salary: {j(profile.get("min_salary"))}          # number, from profile.json min_salary
-  currency: {j(profile.get("currency", "USD"))}
+  currency: {j(profile.get("currency", "USD") or None)}
 
 location:
   city: {j(city)}
   region: {j(region)}
   country: {j(country)}
   willing_to_relocate: null         # true / false
-  open_to_remote: {j(bool(profile.get("remote_ok")) if "remote_ok" in profile else None)}
+  open_to_remote: {j(profile.get("remote_ok"))}
 
 employment:
   current_company: null

@@ -249,11 +249,17 @@ def test_job_detail_gathers_the_files_and_titles_with_brackets_cannot_break_rend
 
 def test_the_data_layer_needs_nothing_but_the_standard_library():
     """The dashboard runs in its own small environment (Textual + PyYAML), so data.py must not import project modules."""
-    tree = ast.parse(Path(data.__file__).read_text(encoding="utf-8"))
-    imported = {n.names[0].name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import)} | {
-        n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module and n.level == 0
-    }
-    assert imported <= set(sys.stdlib_module_names) | {"yaml"}, imported - set(sys.stdlib_module_names)
+    def imports(path: Path) -> set[str]:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        return {n.names[0].name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import)} | {
+            n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module and n.level == 0
+        }
+
+    allowed = set(sys.stdlib_module_names) | {"yaml"}
+    # The one project module it may use is config_loader (so the dashboard reads config.local.yaml like everything else), which is itself
+    # nothing but the standard library and PyYAML.
+    assert imports(Path(data.__file__)) - {"config_loader"} <= allowed, imports(Path(data.__file__)) - allowed
+    assert imports(Path(data.__file__).parent.parent / "config_loader.py") <= allowed
 
 
 def test_small_formatting_helpers():

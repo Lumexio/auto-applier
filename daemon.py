@@ -15,7 +15,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
-from profile_gen import parse_resume_to_profile
+from profile_gen import describe_gaps, parse_resume_to_profile
 from scraper import fetch_browser_jobs, fetch_greenhouse_jobs, fetch_lever_jobs
 from stage2_filter.rank import stage2_run
 from stage3_apply.run import stage3_run
@@ -33,7 +33,9 @@ def load_yaml_config(path: str = "config.yaml") -> dict[str, Any]:
     except ImportError as e:
         # The old fallback silently ran a hard-coded config (scraping Stripe!) instead of the user's file.
         raise RuntimeError("PyYAML is required to read config.yaml. Install it with: pip install pyyaml") from e
-    return yaml.safe_load(cfg_file.read_text(encoding="utf-8")) or {}
+    from config_loader import load_config
+
+    return load_config(cfg_file)             # config.yaml with your config.local.yaml merged on top
 
 
 def parse_ats_target(url: str) -> tuple[str, str] | None:
@@ -193,6 +195,8 @@ class Daemon:
             print(f"[Daemon] {self.profile_path} not found. Generating from resume source of truth...")
             profile = parse_resume_to_profile()
             self.profile_path.write_text(json.dumps(profile, indent=2), encoding="utf-8")
+            for gap in describe_gaps(profile):
+                print(f"[Daemon] profile.json does not say yet: {gap}")
             return profile
         return json.loads(self.profile_path.read_text(encoding="utf-8"))
 
@@ -204,7 +208,7 @@ class Daemon:
         run_id = self.state.start_run("stage1", cfg_hash, prof_hash)
         print(f"\n=======================================================")
         print(f"[Daemon] Starting cycle (Run ID: {run_id}) at {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"Candidate: {profile['name']} | Mode: {profile.get('mode', 'autonomous')}")
+        print(f"Candidate: {profile['name']} | Mode: {profile.get('mode') or self.config.get('stage3', {}).get('mode', 'dry_run')}")
         print(f"=======================================================")
 
         try:

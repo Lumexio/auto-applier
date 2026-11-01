@@ -65,9 +65,9 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg: dict = {}
     if Path(args.config).is_file():
-        import yaml
+        from config_loader import load_config
 
-        cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8")) or {}
+        cfg = load_config(args.config)
     needed = {**DEFAULT_PROBATION, **(cfg.get("agent", {}).get("probation") or {})}["clean_runs_to_trust"]
     store = StateStore(cfg.get("daemon", {}).get("state_db", "state.db"))
     try:
