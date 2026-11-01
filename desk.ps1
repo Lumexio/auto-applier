@@ -7,15 +7,22 @@
 #                            bottom the daemon: starts it, then follows its log
 #   ./setup -EnableDesk    open it at every Windows login      (./setup -DisableDesk to stop)
 #
+# The one graphical interface the project has, the Langflow web UI (http://localhost:7860), opens in your default browser as soon
+# as it answers (it needs a minute or two to start). The REST API on port 8000 has no screen, so nothing opens for it.
+# Add -NoGui to leave the browser out.
+#
 # The bottom pane starts the services itself, and only once Ollama answers: the daemon checks the models a single time, at
 # start, so one that starts before Ollama is ready runs the whole session without its extra models.
-# Add -DaemonOnly to leave the REST API and Langflow out.
+# Add -DaemonOnly to leave the REST API and Langflow out (and with them the browser).
 # ==============================================================================
 
 param (
-    [ValidateSet("Launch", "Daemon", "Pending")][string]$Pane = "Launch",
+    [ValidateSet("Launch", "Daemon", "Pending", "Gui")][string]$Pane = "Launch",
     [switch]$DaemonOnly,
-    [int]$WaitMinutes = 10
+    [switch]$NoGui,
+    [string]$Url = "http://localhost:7860",
+    [string]$OpenWith = "",
+    [double]$WaitMinutes = 10
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,6 +43,33 @@ function Test-Ollama {
 
 function Get-DaemonProcess {
     Get-CimInstance Win32_Process -Filter "Name = 'python.exe' AND CommandLine LIKE '%daemon.py%'" -ErrorAction SilentlyContinue | Select-Object -First 1
+}
+
+# Any HTTP answer means the server is up, an error page included; only "nothing is listening yet" counts as down.
+function Test-Url ([string]$Address) {
+    try {
+        Invoke-WebRequest -Uri $Address -UseBasicParsing -TimeoutSec 3 | Out-Null
+        return $true
+    } catch {
+        return ($null -ne $_.Exception.Response)
+    }
+}
+
+# --------------------------------------------------------------------------- pane: open the web UI once it answers
+if ($Pane -eq "Gui") {
+    $deadline = (Get-Date).AddMinutes($WaitMinutes)
+    $up = Test-Url $Url
+    while (-not $up -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 2
+        $up = Test-Url $Url
+    }
+    if (-not $up) {
+        Write-Host "$Url did not answer within $WaitMinutes minutes, so it was not opened." -ForegroundColor Yellow
+        exit 0
+    }
+    if ($OpenWith) { Start-Process -FilePath $OpenWith -ArgumentList $Url } else { Start-Process $Url }
+    Write-Host "Opened $Url" -ForegroundColor Green
+    exit 0
 }
 
 # --------------------------------------------------------------------------- pane: what is waiting for you
@@ -67,6 +101,11 @@ if ($Pane -eq "Daemon") {
         Write-Host "Ollama did not answer within $WaitMinutes minutes. Starting anyway: the extra models will not be used until you restart the daemon (setup.bat -StopAll, then setup.bat -All -Background)." -ForegroundColor Red
     }
 
+    if (-not $DaemonOnly -and -not $NoGui) {
+        # Hidden, and on its own: it waits for Langflow however long that takes (up to $WaitMinutes) and then opens the browser
+        Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -ArgumentList @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$Self`"", "-Pane", "Gui", "-WaitMinutes", $WaitMinutes)
+    }
+
     $flags = @{ Background = $true; SkipChecks = $true }
     if ($DaemonOnly) { $flags.Daemon = $true } else { $flags.All = $true }
     for ($attempt = 1; $attempt -le 6; $attempt++) {
@@ -88,7 +127,7 @@ if ($Pane -eq "Daemon") {
 }
 
 # --------------------------------------------------------------------------- launch the window
-$daemonArgs = "-Pane Daemon" + $(if ($DaemonOnly) { " -DaemonOnly" } else { "" })
+$daemonArgs = "-Pane Daemon" + $(if ($DaemonOnly) { " -DaemonOnly" } else { "" }) + $(if ($NoGui) { " -NoGui" } else { "" })
 $ps = "powershell.exe -NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -File `"$Self`""
 
 if (Get-Command wt.exe -ErrorAction SilentlyContinue) {
@@ -106,6 +145,7 @@ if (Get-Command wt.exe -ErrorAction SilentlyContinue) {
     Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoLogo", "-NoProfile", "-NoExit", "-ExecutionPolicy", "Bypass", "-File", $Self, "-Pane", "Pending") -WorkingDirectory $ProjectDir
     $daemonList = @("-NoLogo", "-NoProfile", "-NoExit", "-ExecutionPolicy", "Bypass", "-File", $Self, "-Pane", "Daemon")
     if ($DaemonOnly) { $daemonList += "-DaemonOnly" }
+    if ($NoGui) { $daemonList += "-NoGui" }
     Start-Process -FilePath "powershell.exe" -ArgumentList $daemonList -WorkingDirectory $ProjectDir
     Write-Host "Desk opened in three windows (install Windows Terminal for a single tiled window)." -ForegroundColor Green
 }

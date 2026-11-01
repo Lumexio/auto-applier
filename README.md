@@ -209,7 +209,7 @@ Then run it for real, either `python daemon.py` or `setup.bat -All -Background`.
 | `python fit_review.py list` / `show` / `approve <job>` / `reject <job>` | See postings the models vetoed or disagreed about, and overrule them |
 | `python source.py sync` / `show` / `check` | Copy your resumes into `me/`, see the years the bot computes from them and why, find contradictions |
 | `python pending.py [--watch 60]` | One screen of everything waiting for you, with the command or link for each |
-| `setup.bat -Desk` / `-EnableDesk` | Open dashboard + pending list + daemon log in one terminal window now / at every Windows login |
+| `setup.bat -Desk` / `-EnableDesk` | Open dashboard + pending list + daemon log in one terminal window, and the Langflow web UI in your browser, now / at every Windows login (`-NoGui` skips the browser) |
 | `tui.bat` | Live terminal dashboard (`--demo` for made-up data, `--once` to print a text snapshot) |
 | `python api.py --port 8000` | Local REST API |
 | `setup.bat -Status` | Show daemon / API / Langflow state |
