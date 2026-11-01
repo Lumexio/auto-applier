@@ -35,6 +35,14 @@ SKILL_ALIASES = {
     "c/c++": ("c++",),
     "postgresql": ("postgres",),
     "javascript": ("ecmascript",),
+    "react.js": ("reactjs", "react js", "react"),
+    "vue.js": ("vuejs", "vue js", "vue"),
+    "electron.js": ("electronjs", "electron"),
+    "three.js": ("threejs", "three js"),
+    "next.js": ("nextjs", "next js"),
+    "nuxt.js": ("nuxtjs", "nuxt js"),
+    "mongodb": ("mongo",),
+    "kubernetes": ("k8s",),
 }
 
 

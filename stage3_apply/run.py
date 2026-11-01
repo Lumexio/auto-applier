@@ -9,10 +9,12 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from answerer import DEFAULT_ANSWERS_CFG, QuestionSolver
-from facts import load_facts
+from answerer import DEFAULT_ANSWERS_CFG, AnswerContext, QuestionSolver, release_answerable
+from facts import load_facts, overlay_derived
 from fit import DEFAULT_FIT_CFG, FitScorer, build_fit_gate
+from llm_client import build_llm_cfg
 from form_questions import EXTRACT_JS
+from resume_facts import ensure_derived
 from sites import DEFAULT_PROBATION, site_fingerprint
 
 from .ats_handlers import (
@@ -20,6 +22,7 @@ from .ats_handlers import (
     CaptchaEncountered,
     DuplicateApplication,
     FallbackHandler,
+    FitDisputed,
     LoginRequired,
     NeedsHumanInput,
     NotAFit,
@@ -456,14 +459,27 @@ def _resolve_outcome(session: Any, handler: Any, job: dict[str, Any], res: Any, 
 
 
 def _load_facts_or_empty(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Your facts.yaml with what your resumes show (me/resumes, me/experience) underneath it: a value you state always wins."""
     path = cfg.get("paths", {}).get("facts", "facts.yaml")
     try:
         facts = load_facts(path)
     except Exception as e:                       # malformed YAML must not take the daemon down
         print(f"[Stage 3] Could not read {path}: {e}. Continuing without a fact sheet.")
-        return {}
-    if not facts:
-        print(f"[Stage 3] No {path}: only your contact details can be filled in. Create it with: python answers.py facts-init")
+        facts = {}
+    else:
+        if not facts:
+            print(f"[Stage 3] No {path}: only your contact details can be filled in. Create it with: python answers.py facts-init")
+    try:
+        derived = ensure_derived(cfg)            # re-derived when a resume, the policy or the month changed
+        if derived:
+            facts = overlay_derived(facts, derived)
+            n = len((derived.get("experience") or {}).get("years_by_skill") or {})
+            print(f"[Stage 3] Resumes read ({len(derived.get('sources') or [])} files): {derived['experience'].get('total_years')} years of work, "
+                  f"{n} technologies with years (what you state in {path} wins).")
+            for conflict in derived.get("conflicts") or []:
+                print(f"[Stage 3] Your resume versions disagree about a date, the shorter is used: {conflict}")
+    except Exception as e:                       # the resumes are a bonus: never let them stop an application cycle
+        print(f"[Stage 3] Could not read your resumes ({type(e).__name__}: {e}); using {path} only.")
     return facts
 
 
@@ -545,7 +561,7 @@ def stage3_run(
     )
     limited_domains: set[str] = set()
 
-    llm_cfg = cfg.get("llm", {})
+    llm_cfg = build_llm_cfg(cfg)                       # the `llm` block plus the optional `models:` roles; each component picks its own model from it
     answers_cfg = {**DEFAULT_ANSWERS_CFG, **cfg.get("answers", {})}
     fit_cfg = {**DEFAULT_FIT_CFG, **cfg.get("fit", {})}
     confirm_timeout = int(stage3_cfg.get("confirmation_timeout_seconds", 20))
@@ -556,6 +572,13 @@ def stage3_run(
         QuestionSolver(profile, facts, llm_cfg, answers_cfg, bank_get=state.get_answer if state else None)
         if answers_cfg["enabled"] else None
     )
+    if solver is not None and state is not None:
+        try:                                         # a new fact, or a resume you just edited, un-parks the jobs that were waiting on it
+            resolved, requeued = release_answerable(state, AnswerContext(profile=profile, facts=facts, cfg=answers_cfg, bank_get=state.get_answer))
+            if resolved or requeued:
+                print(f"[Stage 3] {resolved} parked question(s) can now be answered from your facts and resumes; {requeued} job(s) queued again.")
+        except Exception as e:                       # never let housekeeping stop a cycle
+            print(f"[Stage 3] Could not re-check the parked questions ({type(e).__name__}: {e}).")
     fit_gate = None
     if fit_cfg["enabled"]:
         fit_gate = build_fit_gate(
@@ -722,10 +745,20 @@ def stage3_run(
                 except NotAFit as e:
                     print(f"[Stage 3] Skipping {job['title']} @ {job['company']}: {e.summary}")
                     if tx:
-                        # error_code makes this skip permanent (a CAPTCHA skip, which has none, stays retryable)
-                        tx.mark("skipped", ats=handler.name, error=e.summary[:300], error_code="not_a_fit")
+                        # error_code makes this skip permanent (a CAPTCHA skip, which has none, stays retryable). A verdict is
+                        # permanent; "the model could not be asked" is not a verdict, so that one is tried again next cycle.
+                        unassessed = e.details.get("error") in ("llm_error", "review_unavailable")
+                        tx.mark("skipped", ats=handler.name, error=e.summary[:300], **({} if unassessed else {"error_code": "not_a_fit"}))
+                        if unassessed:
+                            tx.refund_attempt()           # not the job's fault: a long outage must not block it for good
                     elif state:
                         state.log_event("INFO", "stage3", "dry_run_not_a_fit", json.dumps(e.details)[:2000], run_id=run_id, job_id=job_id)
+                except FitDisputed as e:
+                    print(f"[Stage 3] Parked {job['title']} @ {job['company']}: {e.summary}. Decide with: python fit_review.py list")
+                    if tx:
+                        tx.mark("needs_review", ats=handler.name, error=e.summary[:300], error_code="fit_disagreement")   # blocks retries until you decide
+                    elif state:
+                        state.log_event("INFO", "stage3", "dry_run_fit_disputed", json.dumps(e.details)[:2000], run_id=run_id, job_id=job_id)
                 except NeedsHumanInput as e:
                     print(f"[Stage 3] {job['title']} @ {job['company']}: {e}. Parked; see: python answers.py pending")
                     if state:

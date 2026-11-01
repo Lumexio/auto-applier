@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from llm_client import LLMError, chat_json
+from llm_client import LLMError, chat_json, for_task
 from page_state import SAFE_CATEGORIES, Action, PageSnapshot, take_snapshot
 from sites import ATS_HOSTS, site_fingerprint
 
@@ -218,10 +218,12 @@ class ApplyAgent:
     # ------------------------------------------------------------------ asking the model
 
     def _ask_model(self, snap: PageSnapshot, options: list[Action]) -> Decision:
-        """Ask the model in ``consensus`` different menu orders. It must pick the same action every time.
+        """Ask in ``consensus`` different menu orders. The answer must be the same action every time.
 
-        If its answer changes when only the order of the menu changes, it has no real preference (small models lean
-        towards the first and the last entry), and acting on that guess is worse than stopping.
+        If the answer changes when only the order of the menu changes, there is no real preference (small models lean
+        towards the first and the last entry), and acting on that guess is worse than stopping. With several models
+        configured for the "agent" task (``models.tasks.agent``) each vote is cast by the next model in turn, so the votes
+        must also agree across models, whose mistakes differ more than one model's do across menu orders.
         """
         options = options[:10]
         n = len(options)
@@ -230,17 +232,17 @@ class ApplyAgent:
         for k in range(max(1, int(self.cfg["consensus"]))):
             order = orders[k % len(orders)]
             try:
-                picked = self._vote(snap, [options[i] for i in order])
+                picked = self._vote(snap, [options[i] for i in order], k)
             except LLMError as e:
                 raise AgentStop("unsupported", f"the page is ambiguous and the model is unavailable ({e})") from e
             picks.append(None if picked is None else order[picked])
         if len(set(picks)) != 1:
-            raise AgentStop("unsupported", "the model answered differently when the menu order changed, so it is guessing; not acting on a guess")
+            raise AgentStop("unsupported", "the votes differed when the menu order or the model changed, so it is guessing; not acting on a guess")
         if picks[0] is None:
             raise AgentStop("unsupported", "the model judged this page not to be part of applying")
         return Decision("click", options[picks[0]], "the model chose this in every menu order", source="llm")
 
-    def _vote(self, snap: PageSnapshot, ordered: list[Action]) -> int | None:
+    def _vote(self, snap: PageSnapshot, ordered: list[Action], vote: int = 0) -> int | None:
         menu = []
         for i, a in enumerate(ordered, 1):
             where = f" (link to {site_fingerprint(a.href)})" if a.href else ""
@@ -251,7 +253,7 @@ class ApplyAgent:
             f"JOB: {self.job.get('title', '')} at {self.job.get('company', '')}\nGOAL: finish and submit this application\n"
             f"PAGE: {snap.title[:80]} ({site_fingerprint(snap.url)})\nTEXT:\n{snap.text[:900]}\n\nSO FAR:\n{history}\n\nMENU:\n" + "\n".join(menu)
         )
-        reply = chat_json(self.llm_cfg, _SYSTEM, user, max_tokens=60)
+        reply = chat_json(for_task(self.llm_cfg, "agent", vote), _SYSTEM, user, max_tokens=60)
         try:
             choice = int(str(reply.get("choice")).strip())
         except ValueError:

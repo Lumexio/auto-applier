@@ -7,6 +7,7 @@ answer is not there is never guessed, the application is parked for review inste
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -25,10 +26,13 @@ def load_facts(path: str | Path) -> dict[str, Any]:
 
 
 def flatten(data: Any, prefix: str = "") -> dict[str, Any]:
-    """{'a': {'b': 1}, 'c': [1, 2], 'd': None} -> {'a.b': 1, 'c': [1, 2]}  (null / empty leaves are 'not stated' and dropped)."""
+    """{'a': {'b': 1}, 'c': [1, 2], 'd': None} -> {'a.b': 1, 'c': [1, 2]}  (null / empty leaves are 'not stated' and dropped).
+    Top-level keys that start with an underscore (``_provenance``) are bookkeeping, not facts, and never reach a prompt."""
     out: dict[str, Any] = {}
     if isinstance(data, dict):
         for k, v in data.items():
+            if not prefix and str(k).startswith("_"):
+                continue
             out.update(flatten(v, f"{prefix}.{k}" if prefix else str(k)))
     elif data is not None and data != "" and data != []:
         out[prefix] = data
@@ -42,6 +46,35 @@ def get_path(data: dict[str, Any], dotted: str) -> Any:
             return None
         cur = cur[part]
     return cur
+
+
+def _fill(base: dict[str, Any], extra: dict[str, Any], prefix: str, taken: list[str]) -> None:
+    for key, value in extra.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(value, dict):
+            if not isinstance(base.get(key), dict):
+                base[key] = {}
+            _fill(base[key], value, path, taken)
+        elif base.get(key) in (None, "", []):                     # only a missing / null value falls back to the derived one
+            base[key] = value
+            taken.append(path)
+
+
+def overlay_derived(facts: dict[str, Any], derived: dict[str, Any]) -> dict[str, Any]:
+    """``facts`` (yours) over ``derived`` (computed from your resumes): what you state always wins; a null falls back to the resumes.
+
+    The result also carries ``_provenance``: derived leaf path -> why that value is what it is, so an answer built from it can say so.
+    """
+    if not derived:
+        return facts
+    layer = {k: derived[k] for k in ("experience", "narrative") if isinstance(derived.get(k), dict)}
+    merged = copy.deepcopy(facts)
+    taken: list[str] = []
+    _fill(merged, layer, "", taken)
+    notes = derived.get("provenance") or {}
+    if taken:
+        merged["_provenance"] = {p: str(notes.get(p, "derived from your resumes")) for p in taken}
+    return merged
 
 
 def profile_view(profile: dict[str, Any]) -> dict[str, Any]:

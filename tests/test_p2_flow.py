@@ -298,6 +298,38 @@ def test_a_poor_fit_is_skipped_for_good_and_never_judged_twice():
         store.close()
 
 
+def test_a_fit_that_could_not_be_assessed_is_skipped_for_now_not_for_good():
+    """fit.on_llm_error: skip means 'do not apply unchecked', not 'give this job up': a model outage must not cost the posting."""
+    with tmp_cwd() as tmp:
+        store = StateStore(tmp / "s.db")
+        cfg = {**cfg_for(tmp, "autonomous"), "fit": {"on_llm_error": "skip"}}
+        page = DynPage(main_text=LONG_POSTING)
+
+        def cycle(**model):
+            rid = store.start_run("stage3", "h", "p")
+            job = {**save_job(store, rid, "g1", GH_URL), "description": LONG_POSTING}
+            with fake_playwright(page), patch("answerer.chat_json", side_effect=LLMError("model down")), patch("fit.chat_json", **model), \
+                    patch("stage3_apply.run.wait_for_confirmation", return_value=False):
+                stage3_run([job], dict(PROFILE, mode="autonomous"), state=store, run_id=rid, config=cfg)
+            return app_row(store, "g1")
+
+        row = cycle(side_effect=LLMError("model down"))
+        assert row["status"] == "skipped" and row["error_code"] is None and "on_llm_error" in row["error_message"]
+        assert not [a for a in page.actions if a[0] == "fill"], "an unchecked posting must not be filled in"
+        assert store.is_already_submitted(GH_URL) is False                              # retryable, like a CAPTCHA skip
+        assert row["attempts"] == 0, "an outage is not the job's fault: it must not use up one of its attempts"
+        for _ in range(5):                                                                # a long outage: far more cycles than max_attempts
+            assert cycle(side_effect=LLMError("model down"))["status"] == "skipped"
+        assert store.is_already_submitted(GH_URL) is False                              # still not blocked for good
+
+        low = {"fit": 20, "seniority_match": "below", "missing_must_haves": [], "deal_breakers": [], "summary": "mostly frontend work"}
+        row = cycle(return_value=low)                                                    # next cycle the model is back and really judges it
+        assert (row["status"], row["error_code"]) == ("skipped", "not_a_fit") and "20%" in row["error_message"]
+        assert store.is_already_submitted(GH_URL) is True                               # a real verdict is permanent
+        assert row["attempts"] == 1                                                      # and it is a real attempt: only outages are refunded
+        store.close()
+
+
 def test_dry_runs_assess_and_report_but_never_write_application_state():
     with tmp_cwd() as tmp:
         low = {"fit": 10, "seniority_match": "below", "missing_must_haves": [], "deal_breakers": [], "summary": "no"}

@@ -151,22 +151,30 @@ def test_persistent_context_and_langflow_components(sample_profile):
     from langflow_components import ProfileComponent, StateMonitorComponent
     from lfx.graph.graph.base import Graph
 
-    # 1. Profile component test
-    prof = ProfileComponent().build()
-    assert "name" in prof
-    assert "skills" in prof
+    from tests.test_p0_safety import tmp_cwd
 
-    # 2. State monitor component test
-    metrics = StateMonitorComponent().build()
-    assert "total_jobs" in metrics
-    assert "submitted" in metrics
+    flow_file = Path("auto_applier_flow.json").resolve()          # found before the components move into a scratch folder
+
+    # The components read profile.json and state.db from the working folder (and write profile.json when it is
+    # missing), so run them in a scratch folder with a sample profile: never against a real profile or database.
+    with tmp_cwd() as tmp:
+        (tmp / "profile.json").write_text(json.dumps(sample_profile), encoding="utf-8")
+
+        # 1. Profile component test
+        prof = ProfileComponent().build()
+        assert "name" in prof
+        assert "skills" in prof
+
+        # 2. State monitor component test
+        metrics = StateMonitorComponent().build()
+        assert "total_jobs" in metrics
+        assert "submitted" in metrics
 
     # 3. Persistent profile directory check
     profile_dir = Path("./.browser_profile")
     assert profile_dir is not None
 
     # 4. Valid Langflow Graph payload check
-    flow_file = Path("auto_applier_flow.json")
     assert flow_file.is_file(), "auto_applier_flow.json missing"
     payload = json.loads(flow_file.read_text(encoding="utf-8"))
     g = Graph.from_payload(payload)

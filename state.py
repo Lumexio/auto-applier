@@ -64,6 +64,12 @@ class ApplicationTransaction:
         )
         self.state.conn.commit()
 
+    def refund_attempt(self) -> None:
+        """Give back the attempt this transaction started. For a failure that says nothing about the job (the model was
+        unreachable), so that a long outage cannot use up the job's few attempts and block it for good."""
+        self.state.conn.execute("UPDATE applications SET attempts = MAX(attempts - 1, 0) WHERE job_id = ?", (self.job_id,))
+        self.state.conn.commit()
+
     def checkpoint(self, step_name: str) -> None:
         self.state.conn.execute(
             "UPDATE applications SET checkpoint_step = ? WHERE job_id = ?",
@@ -613,6 +619,67 @@ class StateStore:
             (job_id, cache_key, score, verdict, payload, model, utc_now()),
         )
         self.conn.commit()
+
+    # ---- Fit vetoes: what the models decided, and what you decided over them -------
+
+    def set_fit_override(self, job_id: str, decision: str, note: str = "") -> None:
+        if decision not in ("apply", "skip"):
+            raise ValueError("decision must be 'apply' or 'skip'")
+        self.conn.execute(
+            """
+            INSERT INTO fit_overrides(job_id, decision, note, decided_at) VALUES (?, ?, ?, ?)
+            ON CONFLICT(job_id) DO UPDATE SET decision = excluded.decision, note = excluded.note, decided_at = excluded.decided_at
+            """,
+            (job_id, decision, note, utc_now()),
+        )
+        self.conn.commit()
+
+    def get_fit_override(self, job_id: str) -> str | None:
+        row = self.conn.execute("SELECT decision FROM fit_overrides WHERE job_id = ?", (job_id,)).fetchone()
+        return row["decision"] if row else None
+
+    # A veto that is final, one the models disagree about, or one still waiting for its second opinion.
+    _FIT_REVIEW_WHERE = """
+        (a.status = 'skipped' AND a.error_code = 'not_a_fit')
+        OR (a.status = 'needs_review' AND a.error_code = 'fit_disagreement')
+        OR (a.status = 'skipped' AND a.error_code IS NULL AND a.error_message LIKE 'fit veto not confirmed%')
+    """
+
+    def list_fit_reviews(self, job_id_prefix: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+        """Postings skipped for fit (or parked because the models disagree), newest first, with the models' own words."""
+        rows = self.conn.execute(
+            f"""
+            SELECT a.job_id, a.status, a.error_code, a.error_message, a.started_at, a.finished_at, a.attempts,
+                   j.title, j.company, j.apply_url,
+                   f.score, f.verdict, f.payload, f.model, o.decision AS override
+              FROM applications a
+              JOIN jobs j ON j.id = a.job_id
+              LEFT JOIN fit_scores f ON f.job_id = a.job_id
+                   AND f.created_at = (SELECT MAX(created_at) FROM fit_scores WHERE job_id = a.job_id)
+              LEFT JOIN fit_overrides o ON o.job_id = a.job_id
+             WHERE ({self._FIT_REVIEW_WHERE}) AND (? IS NULL OR a.job_id LIKE ? || '%')
+             ORDER BY COALESCE(a.finished_at, a.started_at) DESC LIMIT ?
+            """,
+            (job_id_prefix, job_id_prefix, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def finalize_fit_skip(self, job_id: str, message: str) -> bool:
+        """Make a fit skip permanent: a parked disagreement or a postponed veto becomes a final ``not_a_fit``."""
+        cur = self.conn.execute(
+            "UPDATE applications SET status = 'skipped', error_code = 'not_a_fit', error_message = ?, finished_at = ? WHERE job_id = ?",
+            (message[:300], utc_now(), job_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def requeue_after_fit_decision(self, job_id: str) -> bool:
+        """Forget a fit skip / fit disagreement so the posting can be queued again (it is judged again, and your override applies)."""
+        cur = self.conn.execute(
+            f"DELETE FROM applications WHERE job_id = ? AND ({self._FIT_REVIEW_WHERE.replace('a.', '')})", (job_id,)
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
 
     def close(self) -> None:
         self.conn.close()

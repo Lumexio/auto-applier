@@ -6,6 +6,9 @@
 #   ./setup -StopAll              (Stop all background services)
 #   ./setup -EnableAutoStart      (Enable auto-start on Windows PC boot/login)
 #   ./setup -DisableAutoStart     (Disable auto-start on Windows PC boot/login)
+#   ./setup -Desk                 (Open the desk now: dashboard + what is pending + the daemon log, in Windows Terminal)
+#   ./setup -EnableDesk           (Open the desk at every Windows login and start the services; replaces -EnableAutoStart)
+#   ./setup -DisableDesk          (Stop opening the desk at login)
 #   ./setup -Daemon -Background   (Start background detached daemon)
 #   ./setup -StopDaemon           (Stop running background daemon)
 #   ./setup -Status               (Check all services, autostart & log status)
@@ -33,6 +36,11 @@ param (
     [switch]$Api,
     [switch]$Test,
     [switch]$SyncCookies,
+    [switch]$SkipChecks,
+    [switch]$Desk,
+    [switch]$EnableDesk,
+    [switch]$DisableDesk,
+    [switch]$DaemonOnly,
     [string]$Login = "",
     [string]$Browser = "firefox"
 )
@@ -45,7 +53,7 @@ Write-Host "`n=======================================================" -Foregrou
 Write-Host "   AI Parallel Auto Job Applier - Setup & Launcher" -ForegroundColor Cyan
 Write-Host "=======================================================`n" -ForegroundColor Cyan
 
-$isQuickOp = $Status -or $Logs -or $StopAll -or $StopDaemon -or $DisableAutoStart
+$isQuickOp = $Status -or $Logs -or $StopAll -or $StopDaemon -or $DisableAutoStart -or $SkipChecks -or $Desk -or $EnableDesk -or $DisableDesk
 
 if (-not $isQuickOp) {
     # 1. Verify Python
@@ -85,11 +93,21 @@ if (-not $isQuickOp) {
 }
 
 # Daemon & Service Process Management Helpers
+function Test-OwnProcess ($ProcId, [string]$Needle) {
+    # A pid file outlives a reboot, and Windows then hands the old number to some other program. A stored pid is only
+    # trusted if that process really is ours (its command line names our script); otherwise "already running" would
+    # keep the daemon from starting at boot, and -StopAll would kill a stranger.
+    try { $n = [int]("$ProcId".Trim()) } catch { return $false }
+    if ($n -le 0) { return $false }
+    $c = Get-CimInstance Win32_Process -Filter "ProcessId = $n" -ErrorAction SilentlyContinue
+    return [bool]($c -and $c.CommandLine -and ($c.CommandLine -like "*$Needle*"))
+}
+
 function Start-DaemonProcess ([switch]$AsBackground, [string]$BrowserEngine = "firefox") {
     $pidFile = Join-Path $ProjectDir ".daemon.pid"
     if (Test-Path $pidFile) {
         $existingPid = Get-Content $pidFile -ErrorAction SilentlyContinue
-        if ($existingPid -and (Get-Process -Id $existingPid -ErrorAction SilentlyContinue)) {
+        if ($existingPid -and (Test-OwnProcess $existingPid "daemon.py")) {
             Write-Host "Daemon is already running in background (PID: $existingPid)." -ForegroundColor Yellow
             Write-Host "View logs with: ./setup -Logs" -ForegroundColor DarkGray
             return
@@ -116,8 +134,7 @@ function Stop-DaemonProcess {
     if (Test-Path $pidFile) {
         $targetPid = Get-Content $pidFile -ErrorAction SilentlyContinue
         if ($targetPid) {
-            $p = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
-            if ($p) {
+            if (Test-OwnProcess $targetPid "daemon.py") {
                 Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
                 Write-Host "Daemon (PID: $targetPid) stopped successfully." -ForegroundColor Green
                 $stopped = $true
@@ -140,7 +157,7 @@ function Stop-DaemonProcess {
     if (-not $stopped -and (Test-Path "state.db")) {
         $dbLockPid = python -c "from state import StateStore; s = StateStore('state.db'); r = s.conn.execute('SELECT holder_pid FROM daemon_lock WHERE id = 1').fetchone(); print(r[0] if r else '')" 2>$null
         if ($dbLockPid -and ($dbLockPid.Trim() -ne "")) {
-            $lockProc = Get-Process -Id ([int]$dbLockPid.Trim()) -ErrorAction SilentlyContinue
+            $lockProc = if (Test-OwnProcess $dbLockPid "daemon.py") { Get-Process -Id ([int]$dbLockPid.Trim()) -ErrorAction SilentlyContinue } else { $null }
             if ($lockProc) {
                 Stop-Process -Id $lockProc.Id -Force -ErrorAction SilentlyContinue
                 Write-Host "Daemon (PID: $($lockProc.Id)) stopped successfully." -ForegroundColor Green
@@ -169,7 +186,7 @@ function Start-AllServices ([switch]$AsBackground, [string]$BrowserEngine = "fir
     $apiRunning = $false
     if (Test-Path $apiPidFile) {
         $aPid = Get-Content $apiPidFile -ErrorAction SilentlyContinue
-        if ($aPid -and (Get-Process -Id $aPid -ErrorAction SilentlyContinue)) {
+        if ($aPid -and (Test-OwnProcess $aPid "api.py")) {
             Write-Host "REST API already running on http://127.0.0.1:8000 (PID: $aPid)." -ForegroundColor Yellow
             $apiRunning = $true
         }
@@ -193,7 +210,7 @@ function Start-AllServices ([switch]$AsBackground, [string]$BrowserEngine = "fir
     $lfRunning = $false
     if (Test-Path $lfPidFile) {
         $lPid = Get-Content $lfPidFile -ErrorAction SilentlyContinue
-        if ($lPid -and (Get-Process -Id $lPid -ErrorAction SilentlyContinue)) {
+        if ($lPid -and (Test-OwnProcess $lPid "run_langflow.py")) {
             Write-Host "Langflow Web UI already running on http://localhost:7860 (PID: $lPid)." -ForegroundColor Yellow
             $lfRunning = $true
         }
@@ -228,8 +245,7 @@ function Stop-AllServices {
     if (Test-Path $apiPidFile) {
         $targetPid = Get-Content $apiPidFile -ErrorAction SilentlyContinue
         if ($targetPid) {
-            $p = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
-            if ($p) {
+            if (Test-OwnProcess $targetPid "api.py") {
                 Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
                 Write-Host "REST API (PID: $targetPid) stopped." -ForegroundColor Green
             }
@@ -249,8 +265,7 @@ function Stop-AllServices {
     if (Test-Path $lfPidFile) {
         $targetPid = Get-Content $lfPidFile -ErrorAction SilentlyContinue
         if ($targetPid) {
-            $p = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
-            if ($p) {
+            if (Test-OwnProcess $targetPid "run_langflow.py") {
                 Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
                 Write-Host "Langflow (PID: $targetPid) stopped." -ForegroundColor Green
             }
@@ -292,6 +307,39 @@ function Set-WindowsAutoStart ([bool]$Enable) {
     }
 }
 
+function Set-DeskAutoStart ([bool]$Enable) {
+    $startupFolder = [System.IO.Path]::Combine($env:APPDATA, "Microsoft\Windows\Start Menu\Programs\Startup")
+    $deskVbs = Join-Path $startupFolder "AutoApplierDesk.vbs"
+    $oldVbs = Join-Path $startupFolder "AutoJobApplierAll.vbs"
+
+    if ($Enable) {
+        $deskScript = Join-Path $ProjectDir "desk.ps1"
+        $extra = if ($DaemonOnly) { " -DaemonOnly" } else { "" }
+        # Starts hidden; desk.ps1 then opens the Windows Terminal window (no console flash of its own)
+        $vbsLines = @(
+            'Set objShell = CreateObject("Wscript.Shell")',
+            "objShell.Run ""powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File """"$deskScript""""$extra"", 0, False"
+        )
+        [System.IO.File]::WriteAllText($deskVbs, ($vbsLines -join "`r`n"), [System.Text.Encoding]::ASCII)
+        Write-Host "`n[Desk at login] ENABLED." -ForegroundColor Green
+        Write-Host "When you log in to Windows, one terminal window opens with the live dashboard, what is waiting for you, and the daemon log." -ForegroundColor White
+        Write-Host "The services start there, once Ollama answers (the daemon must not start before it)." -ForegroundColor White
+        Write-Host "Startup file: $deskVbs" -ForegroundColor DarkGray
+        if (Test-Path $oldVbs) {
+            Remove-Item $oldVbs -Force -ErrorAction SilentlyContinue
+            Write-Host "Removed the old hidden login entry (AutoJobApplierAll.vbs): the desk starts the same services, and it would otherwise race Ollama." -ForegroundColor Yellow
+            Write-Host "To go back to it: ./setup -DisableDesk, then ./setup -EnableAutoStart" -ForegroundColor DarkGray
+        }
+    } else {
+        if (Test-Path $deskVbs) {
+            Remove-Item $deskVbs -Force -ErrorAction SilentlyContinue
+            Write-Host "`n[Desk at login] DISABLED (removed from the Windows Startup folder)." -ForegroundColor Yellow
+        } else {
+            Write-Host "`n[Desk at login] Already disabled (no startup entry found)." -ForegroundColor Yellow
+        }
+    }
+}
+
 function Show-DaemonStatus {
     $pidFile = Join-Path $ProjectDir ".daemon.pid"
     $isRunning = $false
@@ -302,7 +350,7 @@ function Show-DaemonStatus {
     # 1. Daemon Status
     if (Test-Path $pidFile) {
         $activeDaemonPid = Get-Content $pidFile -ErrorAction SilentlyContinue
-        if ($activeDaemonPid -and (Get-Process -Id $activeDaemonPid -ErrorAction SilentlyContinue)) {
+        if ($activeDaemonPid -and (Test-OwnProcess $activeDaemonPid "daemon.py")) {
             Write-Host "  Daemon:        RUNNING in background (PID: $activeDaemonPid)" -ForegroundColor Green
             $isRunning = $true
         }
@@ -319,7 +367,7 @@ function Show-DaemonStatus {
     if (-not $isRunning -and (Test-Path "state.db")) {
         $dbLockPid = python -c "from state import StateStore; s = StateStore('state.db'); r = s.conn.execute('SELECT holder_pid FROM daemon_lock WHERE id = 1').fetchone(); print(r[0] if r else '')" 2>$null
         if ($dbLockPid -and ($dbLockPid.Trim() -ne "")) {
-            $lockProc = Get-Process -Id ([int]$dbLockPid.Trim()) -ErrorAction SilentlyContinue
+            $lockProc = if (Test-OwnProcess $dbLockPid "daemon.py") { Get-Process -Id ([int]$dbLockPid.Trim()) -ErrorAction SilentlyContinue } else { $null }
             if ($lockProc) {
                 Write-Host "  Daemon:        RUNNING (PID: $dbLockPid, Lock Active)" -ForegroundColor Green
                 $isRunning = $true
@@ -333,7 +381,7 @@ function Show-DaemonStatus {
     # 2. REST API Status
     $apiPidFile = Join-Path $ProjectDir ".api.pid"
     $apiPid = if (Test-Path $apiPidFile) { Get-Content $apiPidFile -ErrorAction SilentlyContinue } else { $null }
-    $apiProc = if ($apiPid) { Get-Process -Id $apiPid -ErrorAction SilentlyContinue } else { $null }
+    $apiProc = if ($apiPid -and (Test-OwnProcess $apiPid "api.py")) { Get-Process -Id $apiPid -ErrorAction SilentlyContinue } else { $null }
     if (-not $apiProc) {
         $apiCim = Get-CimInstance Win32_Process -Filter "Name = 'python.exe' AND CommandLine LIKE '%api.py%'" -ErrorAction SilentlyContinue
         if ($apiCim) { $apiProc = $apiCim[0] }
@@ -348,7 +396,7 @@ function Show-DaemonStatus {
     # 3. Langflow UI Status
     $lfPidFile = Join-Path $ProjectDir ".langflow.pid"
     $lfPid = if (Test-Path $lfPidFile) { Get-Content $lfPidFile -ErrorAction SilentlyContinue } else { $null }
-    $lfProc = if ($lfPid) { Get-Process -Id $lfPid -ErrorAction SilentlyContinue } else { $null }
+    $lfProc = if ($lfPid -and (Test-OwnProcess $lfPid "run_langflow.py")) { Get-Process -Id $lfPid -ErrorAction SilentlyContinue } else { $null }
     if (-not $lfProc) {
         $lfCim = Get-CimInstance Win32_Process -Filter "Name = 'python.exe' AND CommandLine LIKE '%run_langflow.py%'" -ErrorAction SilentlyContinue
         if ($lfCim) { $lfProc = $lfCim[0] }
@@ -366,6 +414,12 @@ function Show-DaemonStatus {
         Write-Host "  PC Auto-Start: ENABLED (All-in-One starts on login)" -ForegroundColor Green
     } else {
         Write-Host "  PC Auto-Start: DISABLED" -ForegroundColor DarkGray
+    }
+    $deskVbs = Join-Path ([System.IO.Path]::Combine($env:APPDATA, "Microsoft\Windows\Start Menu\Programs\Startup")) "AutoApplierDesk.vbs"
+    if (Test-Path $deskVbs) {
+        Write-Host "  Desk at login: ENABLED (dashboard, pending list and log open at login)" -ForegroundColor Green
+    } else {
+        Write-Host "  Desk at login: DISABLED" -ForegroundColor DarkGray
     }
 
     $logFile = Join-Path $ProjectDir "daemon.log"
@@ -393,6 +447,23 @@ if ($EnableAutoStart) {
 
 if ($DisableAutoStart) {
     Set-WindowsAutoStart -Enable $false
+    exit 0
+}
+
+if ($Desk) {
+    $deskArgs = @{}
+    if ($DaemonOnly) { $deskArgs.DaemonOnly = $true }
+    & (Join-Path $ProjectDir "desk.ps1") @deskArgs
+    exit 0
+}
+
+if ($EnableDesk) {
+    Set-DeskAutoStart -Enable $true
+    exit 0
+}
+
+if ($DisableDesk) {
+    Set-DeskAutoStart -Enable $false
     exit 0
 }
 
@@ -470,13 +541,14 @@ while ($true) {
     Write-Host "  [5] Start Local REST API Service (http://localhost:8000)" -ForegroundColor Yellow
     Write-Host "  [6] Run Test Suite" -ForegroundColor Yellow
     Write-Host "  [7] Sync Cookies from System Firefox Profile" -ForegroundColor Yellow
+    Write-Host "  [D] Open the desk (dashboard + what is pending + daemon log)" -ForegroundColor Green
     Write-Host "  [A] Enable/Disable Auto-Start on Windows PC Boot" -ForegroundColor Yellow
     Write-Host "  [S] Services & Daemon Status" -ForegroundColor Yellow
     Write-Host "  [L] View Live Daemon Logs" -ForegroundColor Yellow
     Write-Host "  [K] Stop All Services (Daemon + API + Langflow)" -ForegroundColor Red
     Write-Host "  [Q] Exit" -ForegroundColor Red
     Write-Host "-------------------------------------------------------" -ForegroundColor DarkCyan
-    $choice = Read-Host "Enter option [0-7, A, S, L, K, Q]"
+    $choice = Read-Host "Enter option [0-7, D, A, S, L, K, Q]"
 
     switch ($choice.ToUpper()) {
         "0" {
@@ -516,6 +588,9 @@ while ($true) {
         "7" {
             Write-Host "`nSyncing cookies from system Firefox profile..." -ForegroundColor Cyan
             python daemon.py --sync-cookies
+        }
+        "D" {
+            & (Join-Path $ProjectDir "desk.ps1")
         }
         "A" {
             $startupVbs = Join-Path ([System.IO.Path]::Combine($env:APPDATA, "Microsoft\Windows\Start Menu\Programs\Startup")) "AutoJobApplierAll.vbs"

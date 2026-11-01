@@ -108,6 +108,16 @@ class NotAFit(ATSError):
         super().__init__(summary)
 
 
+class FitDisputed(ATSError):
+    """One model vetoed the posting and a second model, asked independently, would apply: nobody skips it for good and
+    nobody applies; a person decides (``python fit_review.py``)."""
+
+    def __init__(self, summary: str, details: dict[str, Any] | None = None):
+        self.summary = summary
+        self.details = details or {}
+        super().__init__(summary)
+
+
 class BrowserSession(Protocol):
     url: str
 

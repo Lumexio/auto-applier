@@ -73,6 +73,16 @@ class FakeSession:
         return self._captcha
 
 
+@pytest.fixture(autouse=True)
+def _fresh_circuit_breakers():
+    """The LLM client remembers which models just failed (process-wide); no test may inherit another's outage."""
+    import llm_client
+
+    llm_client.reset_breakers()
+    yield
+    llm_client.reset_breakers()
+
+
 @pytest.fixture
 def tmp_state_store(tmp_path):
     db_file = tmp_path / "test_state.db"
