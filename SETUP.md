@@ -470,7 +470,7 @@ How outcomes are recorded:
 | `unconfirmed` | Submit was clicked but no confirmation appeared. **Never retried automatically**; check the site |
 | `needs_review` | Parked: needs an answer, the form rejected the submit, probation, or an interrupted run |
 | `failed` | Error; retried up to `stage3.max_attempts` |
-| `skipped` | CAPTCHA, login wall, closed posting, or a poor fit. Closed and not-a-fit are permanent |
+| `skipped` | A CAPTCHA challenge on screen (the reason names what was seen), login wall, closed posting, or a poor fit. Closed and not-a-fit are permanent; a CAPTCHA skip is retried later |
 | `duplicate` | The site says it was already applied to |
 
 ### 7.4 Fit vetoes: check what the models skipped

@@ -89,7 +89,7 @@ class AgentHandler(BaseHandler):
             raise UnsupportedForm("agent: nothing was prepared, so there is nothing to submit")
         snap = take_snapshot(self.session)
         if snap.captcha:
-            raise CaptchaEncountered("agent: CAPTCHA at the submit step")
+            raise CaptchaEncountered("agent: CAPTCHA at the submit step" + (f" ({snap.captcha_detail})" if snap.captcha_detail else ""))
         gaps = snap.required_gaps()
         if gaps:
             raise UnsupportedForm("agent: not ready to submit; still empty: " + ", ".join(gaps[:4]))
@@ -116,6 +116,7 @@ class AgentHandler(BaseHandler):
             if fresh:
                 return False, "form rejected the submit: " + "; ".join(fresh[:3])
             if snap.page_type in ("closed", "already_applied", "login", "captcha"):
-                return None, f"after submitting, the page became: {snap.page_type}"
+                seen = f" ({snap.captcha_detail})" if snap.page_type == "captcha" and snap.captcha_detail else ""
+                return None, f"after submitting, the page became: {snap.page_type}{seen}"
             self.session.wait_for_timeout(500)
         return None, "neither a confirmation nor an error appeared"

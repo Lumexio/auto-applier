@@ -169,7 +169,7 @@ class ApplyAgent:
             "confirmed": ("duplicate", "a confirmation page showed up before anything was submitted (already applied?)"),
             "already_applied": ("duplicate", "the site says this job was already applied to"),
             "closed": ("closed", "the posting is closed or no longer available"),
-            "captcha": ("captcha", "a CAPTCHA is in the way"),
+            "captcha": ("captcha", "a CAPTCHA is in the way" + (f" ({snap.captcha_detail})" if snap.captcha_detail else "")),
             "login": ("login", "the site wants an account or sign-in"),
         }.get(snap.page_type)
         if stop:

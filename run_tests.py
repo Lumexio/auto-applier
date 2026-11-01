@@ -312,6 +312,7 @@ def main():
         ("Location Filter", "test_p6_location"),
         ("Pending List and Boot Desk", "test_pending"),
         ("Source of Truth (resumes to facts)", "test_p7_source"),
+        ("CAPTCHA Detection", "test_p9_captcha"),
         ("Repository Hygiene (public repo)", "test_repo_hygiene"),
         ("Multi-user Readiness (config layers, profile, licence)", "test_p8_multiuser"),
     ):

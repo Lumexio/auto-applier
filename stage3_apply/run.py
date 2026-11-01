@@ -328,8 +328,26 @@ class PlaywrightSession:
                     return text[:max_chars]
         return ""
 
+    def captcha_challenges(self) -> list[dict[str, Any]]:
+        """CAPTCHA challenges a person would have to act on, right now (see page_state.CAPTCHA_FN).
+
+        An iframe whose address mentions a CAPTCHA provider is NOT a challenge: Greenhouse and many others load an invisible
+        reCAPTCHA on every application form. Only a checkbox or puzzle that is on screen counts.
+        """
+        from page_state import CAPTCHA_PROBE_JS
+
+        try:
+            found = self.page.evaluate(CAPTCHA_PROBE_JS)
+        except Exception:
+            return []                      # a page that is navigating cannot be probed; the next check will see it
+        return [c for c in found if isinstance(c, dict) and c.get("provider")] if isinstance(found, list) else []
+
     def has_captcha(self) -> bool:
-        return self.has("iframe[src*='recaptcha']") or self.has("iframe[src*='turnstile']") or self.has("iframe[src*='hcaptcha']")
+        return bool(self.captcha_challenges())
+
+    def captcha_evidence(self) -> str:
+        """What the check saw, so a skip that looks wrong can be audited (e.g. 'recaptcha checkbox 304x78')."""
+        return ", ".join(f"{c.get('provider')} {c.get('kind')} {c.get('w')}x{c.get('h')}" for c in self.captcha_challenges()[:3])
 
 
 def _handle_recruiter_outreach(
@@ -726,10 +744,10 @@ def stage3_run(
                     if outcome == "submitted":  # never tell a recruiter "I applied" for an unconfirmed attempt
                         _handle_recruiter_outreach(session, job, profile, state, job_id, app_dir, cfg, is_dry_run=False)
 
-                except CaptchaEncountered:
-                    print(f"[Stage 3] CAPTCHA detected for {job['title']} @ {job['company']}. Marking skipped.")
+                except CaptchaEncountered as e:
+                    print(f"[Stage 3] CAPTCHA detected for {job['title']} @ {job['company']}: {e}. Marking skipped.")
                     if tx:
-                        tx.mark("skipped", ats=handler.name, error="CAPTCHA encountered")
+                        tx.mark("skipped", ats=handler.name, error=f"CAPTCHA encountered: {e}"[:300])
                 except LoginRequired:
                     print(f"[Stage 3] Login required for {job['title']} @ {job['company']}. Marking skipped.")
                     if tx:
