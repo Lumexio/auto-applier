@@ -491,7 +491,9 @@ the flags below skip the menu.
 | `setup.bat -StopAll` | Stop the daemon, API and Langflow |
 | `setup.bat -StopDaemon` | Stop only the daemon |
 | `setup.bat -DryRun` | One dry-run cycle |
-| `setup.bat -EnableAutoStart` / `-DisableAutoStart` | Start everything at Windows login (adds or removes a script in your Startup folder) |
+| `setup.bat -EnableAutoStart` / `-DisableAutoStart` | Start everything at Windows login, hidden (adds or removes a script in your Startup folder) |
+| `setup.bat -Desk` | Open the desk now: dashboard, what is waiting for you, and the daemon log, tiled in one Windows Terminal window |
+| `setup.bat -EnableDesk` / `-DisableDesk` | Open the desk at every Windows login and start the services there (replaces `-EnableAutoStart`; add `-DaemonOnly` to leave out the API and Langflow) |
 | `setup.bat -Login "<url>"` | Open the login browser for a site |
 | `setup.bat -SyncCookies` | Import cookies from your personal Firefox |
 | `setup.bat -Test` | Run the test suite |
@@ -578,6 +580,75 @@ environment too), and `tui.bat --selftest` drives the dashboard headlessly and p
 If colours are missing, your shell has `NO_COLOR` set; unset it. If the dashboard says "daemon stopped" while you
 know it runs, it may be running as another user or in WSL (the process check only sees this Windows session).
 
+### Your source of truth: resumes that answer for you
+
+The bot answers only from what you state, never from imagination. Your resumes are the best statement of your experience you
+already have, so it reads them: the folder `paths.source_dir` (`me/`, never committed) holds your resume versions and any notes
+about your work, and the years a form asks for are **computed from the dates written next to each job**.
+
+```powershell
+python source.py sync      # copy your resume versions in from the resume-template folder (source.sync_from)
+python source.py show      # what the bot now believes: years of work, years per technology, and why for each
+python source.py check     # do your versions agree with each other, and with the "N+ years" they claim?
+```
+
+```
+me/resumes/      resume-backend.md, resume-frontend.md, resume-base.html ...   (what `sync` copies; PDFs are kept for uploading, not read)
+me/experience/   notes in your own words (.md); a heading with a date range ("## Acme, Backend (Mar 2019 - Present)") counts like a job
+me/derived/      experience.yaml, written by the program: every number with where it came from. Do not edit it.
+```
+
+How a number is worked out, in order:
+
+1. **Named in a dated job**: Django appears in the bullets of a job from Mar 2019 to Dec 2022, so Django is 3.8 years. Overlapping jobs
+   count once.
+2. **Implied by a framework**: Laravel or Blade implies PHP, Vue / React / TypeScript imply JavaScript, Django implies Python.
+   (Only technologies your resumes themselves list or put in bold are looked for, so the word "express" in a sentence proves nothing.)
+3. **Dated projects only**: counted for their dates, never more than your job years.
+4. **Listed in your skills but no dated job names it** (`source.experience.undated_skills`): counted as your career length. This is a
+   statement your resumes do not date, so it is the one to look at: `python source.py check` lists them, and
+   `undated_skills: off` makes those questions park again.
+5. **Not shown anywhere in your resumes**: no claim at all. "Years of Kubernetes experience" parks; it is never answered with
+   your career total (the total is offered only for questions that name nothing specific).
+
+What you write in `facts.yaml` always wins, so to correct one number set it there (`experience: {years_by_skill: {Python: 3}}`).
+A computed value is rounded as a person would (4.2 -> 4, 0.9 -> 1) and is recorded on the application as source `derived` with its
+evidence; a value you stated is used exactly as written. `source.experience.count: jobs_and_projects` makes your projects count as
+work too. If two resume versions give different dates for the same job, the shorter is used and `check` reports it.
+
+It refreshes by itself when a resume changes or the month turns ("Present" moves). And every run it re-checks the **parked
+questions**: any that these facts can now answer are resolved and the jobs that were only waiting on them are queued again, so
+fixing a resume or a fact un-parks the backlog without you running anything.
+
+### What is waiting for you, and the desk at login
+
+```powershell
+python pending.py              # print it once
+python pending.py --watch 60   # redraw every minute
+```
+
+One screen of everything only you can do, each with the command or link to deal with it: questions the forms asked, jobs where
+the fit models disagree, postings that send you to the company's own site ("apply for yourself", with the link), runs that were
+cut off ("check by hand"), and sites on probation. Below it, what the machine is waiting on (second opinions, applications
+sent but never confirmed). It is read-only and uses the same data as the dashboard.
+
+`setup.bat -Desk` opens the **desk**: one Windows Terminal window with the live dashboard on the left, this list on the top
+right (refreshed every minute) and the daemon on the bottom right. That last pane starts the services if they are not
+running and then follows `daemon.log`. Closing the window does not stop anything.
+
+`setup.bat -EnableDesk` does this at every Windows login, so the first thing you see after logging in is what is pending and
+the project running. Things to know:
+
+* It replaces the old hidden login entry (`-EnableAutoStart`), because two entries would race. `-DisableDesk` removes the desk
+  entry; `-EnableAutoStart` brings the old one back. Nothing else in your Startup folder is touched.
+* The daemon pane **waits for Ollama** (up to 10 minutes) before it starts the daemon. The daemon checks the models only once,
+  at start; one that starts before Ollama is ready runs the whole session without its extra models. If Ollama never answers
+  it starts anyway and says so.
+* After a quick restart the previous daemon's lock can still look fresh for two minutes and a new daemon refuses to start under
+  it; the pane retries for a few minutes.
+* "Boot" here means logging in: Windows has no desktop to show terminals on before that.
+* Without Windows Terminal (`wt.exe`) it opens three ordinary windows instead.
+
 ## 10. Tuning for your hardware
 
 **Give the model a bigger context window.** Ollama serves a small window by default (2048 tokens on the machine this was
@@ -631,7 +702,7 @@ python -m pytest tests -q
 python run_tests.py
 ```
 
-The suite (248 tests with pytest; `run_tests.py` runs 247, skipping the one that needs the dashboard environment) includes real-browser tests against a fake application server. It takes a few minutes.
+The suite (282 tests with pytest; `run_tests.py` runs 281, skipping the one that needs the dashboard environment) includes real-browser tests against a fake application server. It takes a few minutes.
 Tests that need a Playwright browser are skipped if none is installed. The suite is built around local fake
 servers and stubbed models, so it does not need Ollama or an internet connection.
 

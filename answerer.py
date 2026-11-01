@@ -48,7 +48,7 @@ _NUMBER = re.compile(r"\d[\d,.]*\d|\d")
 class Answer:
     qid: int
     value: Any                       # str | bool | list[str]
-    source: str                      # bank | profile | fact | policy | llm | generated
+    source: str                      # bank | profile | fact | derived (computed from your resumes) | policy | llm | generated
     basis: str                       # where it came from (fact path, rule name, ...)
 
 
@@ -163,10 +163,36 @@ _NOT_A_TECHNOLOGY = {
 }
 
 
+# Words of a "how many years" question that say nothing about what the years are in.
+_QUESTION_WORDS = {
+    "how", "many", "much", "long", "of", "do", "you", "have", "has", "in", "with", "your", "the", "a", "an", "as", "and", "or", "on", "for", "at",
+    "to", "is", "are", "does", "did", "using", "use", "experience", "years", "year", "yrs", "please", "enter", "provide", "estimate", "number",
+    "numeric", "integer", "approximately", "approx", "since", "worked", "working", "been", "total", "overall", "full", "time", "engineer",
+    "developer", "programmer", "web", "application", "applications", "programming", "coding", "senior", "junior",
+}
+
+
 def _names_unknown_technology(t: str) -> bool:
-    after = t.split("experience", 1)[1] if "experience" in t else ""
-    m = re.search(r"\b(?:with|using|in|on|of|for)\s+(\S+)", after)
-    return bool(m) and m.group(1) not in _NOT_A_TECHNOLOGY
+    """Does a "years of experience" question name something (a tool, a field, an industry) other than experience in general?
+
+    Then the career total must not be offered for it: "years of Kubernetes experience" is not "7 years". Anything left after the
+    question's own words and the generic words ("professional", "software", "work" ...) counts as naming something.
+    """
+    return any(w not in _QUESTION_WORDS and w not in _NOT_A_TECHNOLOGY for w in re.findall(r"[a-z0-9+#.]+", t))
+
+
+def _round_years(value: Any) -> str:
+    """Computed years as a person would write them: 4.2 -> 4, 5.1 -> 5, 0.9 -> 1."""
+    n = float(value)
+    return str(int(n + 0.5)) if n >= 0.5 else "0"
+
+
+def _years_answer(ctx: AnswerContext, q: Question, value: Any, path: str) -> Answer | Blocked:
+    """What you stated in facts.yaml is used exactly as written; a value computed from your resumes is rounded and says where it came from."""
+    note = (ctx.facts.get("_provenance") or {}).get(path)
+    if note:
+        return deliver(q, _round_years(value), "derived", f"{path} ({note})")
+    return deliver(q, _number_text(value), "fact", path)
 
 
 def _years(ctx: AnswerContext, q: Question, t: str) -> Answer | Blocked:
@@ -174,16 +200,19 @@ def _years(ctx: AnswerContext, q: Question, t: str) -> Answer | Blocked:
     known = list(dict.fromkeys([*by_skill.keys(), *ctx.profile.get("skills", [])]))
     named = [s for s in known if skill_in(q.label, s)]
     if named:
-        for s in named:
-            if by_skill.get(s) is not None:
-                return deliver(q, _number_text(by_skill[s]), "fact", f"experience.years_by_skill.{s}")
+        have = [(s, by_skill[s]) for s in named if by_skill.get(s) is not None]
+        if have:
+            label = q.label.lower()
+            strictly_all = bool(re.search(r"\band\b", label)) and not re.search(r"\bor\b|e\.g\.|such as|including|\blike\b|similar", label)
+            skill, value = (min if strictly_all else max)(have, key=lambda sv: float(sv[1]))      # "X and Y": the weaker one; "X or Y (e.g. Z)": the best
+            return _years_answer(ctx, q, value, f"experience.years_by_skill.{skill}")
         return Blocked(f"years of experience with {', '.join(named)} are not stated in facts.yaml")
     if _names_unknown_technology(t):
         return Blocked("asks about experience with something that is not in your skills; not claiming your total years for it")
     total = ctx.fact("experience.total_years")
     if total is None:
         return Blocked("'experience.total_years' is not stated in facts.yaml")
-    return deliver(q, _number_text(total), "fact", "experience.total_years")
+    return _years_answer(ctx, q, total, "experience.total_years")
 
 
 def apply_rules(q: Question, ctx: AnswerContext) -> Answer | Blocked | None:
@@ -439,6 +468,23 @@ def _generate_open_ended(q: Question, ctx: AnswerContext) -> Answer | Blocked:
     if not text or len(text) > limit or not _grounded(text, narrative_lines + "\n" + lines):
         return Blocked("the drafted answer was empty, too long, or contained a link/number not in facts.yaml")
     return Answer(q.id, text, "generated", "narrative")
+
+
+def release_answerable(store: Any, ctx: AnswerContext) -> tuple[int, int]:
+    """Parked questions that the facts (or a saved answer) can answer by the deterministic rules now: resolve them and queue their jobs again.
+
+    Returns (questions resolved, jobs queued again). A question only the model could answer stays parked, and so does a job
+    that still has another open question. This is what makes a new fact (or a resume you just updated) un-park the jobs that were waiting.
+    """
+    resolved = 0
+    for row in store.list_pending():
+        q = Question(0, row.get("kind") or "text", row["question_text"], [o for o in (row.get("options") or "").split("|") if o], True)
+        banked = store.get_answer(row["question_key"])
+        result = deliver(q, banked, "bank", f"bank:{row['question_key']}") if banked else apply_rules(q, ctx)
+        if isinstance(result, Answer) and store.resolve_pending(row["question_key"]):
+            resolved += 1
+    requeued = sum(1 for job_id in store.jobs_ready_to_requeue() if store.requeue(job_id))
+    return resolved, requeued
 
 
 def is_open_ended(q: Question) -> bool:

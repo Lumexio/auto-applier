@@ -310,6 +310,9 @@ def main():
         ("Fit Veto Review", "test_p5_fit_review"),
         ("Terminal Dashboard (data and rendering)", "test_tui_data"),
         ("Location Filter", "test_p6_location"),
+        ("Pending List and Boot Desk", "test_pending"),
+        ("Source of Truth (resumes to facts)", "test_p7_source"),
+        ("Repository Hygiene (public repo)", "test_repo_hygiene"),
     ):
         print(f"\n[Suite: P2 {title}]")
         mod = __import__(f"tests.{module}", fromlist=[module])

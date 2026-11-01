@@ -7,7 +7,7 @@ until you stop it or shut the PC down.
 There is no cloud AI behind it. The language model is a small open model (default: `qwen2.5:7b`) served locally
 by [Ollama](https://ollama.com), and everything that matters for safety is decided by ordinary code, not by the model.
 
-> **Status:** active development. The pipeline, the answer engine and the safety rails are covered by 248
+> **Status:** active development. The pipeline, the answer engine and the safety rails are covered by 282
 > automated tests, but a brand-new install has no application history, so **every kind of site starts on
 > probation** (filled in and reviewed, not submitted) until you approve it. See [Safety model](#safety-model).
 > Setup instructions are in **[SETUP.md](SETUP.md)**.
@@ -79,6 +79,15 @@ This project takes the opposite approach:
   judges the posting independently: both skip, the skip is final; it would apply, the job is parked for you rather
   than skipped or applied to. `python fit_review.py list` (or the dashboard's `v` key) shows every veto and lets you
   overturn it.
+
+### Your source of truth
+- Put your resume versions (and notes about your work) in `me/` (never committed; `python source.py sync` copies them from your
+  resume-template folder). **Years of experience are computed from the dates next to each job**, a framework implies its language
+  (Laravel -> PHP, Vue -> JavaScript), and every number records where it came from. `python source.py show` prints them,
+  `python source.py check` looks for contradictions between your versions.
+- A technology your resumes never show is never claimed, and the career total is never offered for a question about a specific tool.
+  What you write in `facts.yaml` always wins over what is computed.
+- Questions that were parked for a missing fact are re-checked every run: add the fact (or fix a resume) and those jobs are queued again.
 
 ### Answering application questions
 - Answers come only from **`facts.yaml`** (a file you own and edit), your contact details in `profile.json`, and
@@ -195,6 +204,9 @@ Then run it for real, either `python daemon.py` or `setup.bat -All -Background`.
 | `python answers.py set "<question>" "<answer>" --requeue` | Answer once for all future applications |
 | `python sites.py list` / `approve <site>` / `revoke <site>` | Manage which sites may be submitted to |
 | `python fit_review.py list` / `show` / `approve <job>` / `reject <job>` | See postings the models vetoed or disagreed about, and overrule them |
+| `python source.py sync` / `show` / `check` | Copy your resumes into `me/`, see the years the bot computes from them and why, find contradictions |
+| `python pending.py [--watch 60]` | One screen of everything waiting for you, with the command or link for each |
+| `setup.bat -Desk` / `-EnableDesk` | Open dashboard + pending list + daemon log in one terminal window now / at every Windows login |
 | `tui.bat` | Live terminal dashboard (`--demo` for made-up data, `--once` to print a text snapshot) |
 | `python api.py --port 8000` | Local REST API |
 | `setup.bat -Status` | Show daemon / API / Langflow state |
@@ -216,6 +228,8 @@ Then run it for real, either `python daemon.py` or `setup.bat -All -Background`.
 | `fit.py`, `fit_review.py` | Model fit scoring (facts check, second opinion) and the command to overrule it |
 | `api.py` | Local REST API |
 | `tui/`, `tui.bat` | Read-only terminal dashboard (data and rendering use only the standard library and `rich`; the Textual app runs in its own `.venv-tui`) |
+| `resume_facts.py`, `source.py` | Reads the resumes in `me/` and computes years per technology with provenance; the command to sync / show / check them |
+| `pending.py`, `desk.ps1` | The "what is waiting for you" screen, and the Windows Terminal layout that shows it with the dashboard and the daemon log |
 | `langflow_components.py`, `run_langflow.py`, `auto_applier_flow.json` | Optional visual pipeline |
 | `outreach.py` | Recruiter outreach (disabled by default) |
 | `stage1_generate/` | Experimental sandboxed scraper-code generator (not part of the daemon loop) |

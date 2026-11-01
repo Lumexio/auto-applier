@@ -462,6 +462,42 @@ def _fill_daemon(snap: Snapshot, root: Path, cfg: dict[str, Any], now: datetime)
             d.next_cycle = finished + timedelta(seconds=interval)
 
 
+@dataclass
+class ParkedRow:
+    """A job the daemon stopped on because only a person can finish it."""
+    job_id: str
+    title: str
+    company: str
+    url: str
+    kind: str          # apply (the posting sends you to the company's own site) | verify (a run was cut off: did it go through?) | other
+    detail: str
+
+
+def parked_for_you(root: str | Path, limit: int = 100, cfg: dict[str, Any] | None = None) -> list[ParkedRow]:
+    """Parked applications that need a person, newest first. Fit disagreements and unanswered questions have their own lists."""
+    root = Path(root)
+    cfg = cfg if cfg is not None else load_config(root)
+    db = root / str((cfg.get("daemon") or {}).get("state_db", "state.db"))
+    try:
+        conn = _connect(db)
+    except sqlite3.Error:
+        return []
+    try:
+        rows = _rows(conn, """
+            SELECT a.job_id, a.error_message, j.title, j.company, COALESCE(j.apply_url, j.url) AS url
+              FROM applications a LEFT JOIN jobs j ON j.id = a.job_id
+             WHERE a.status = 'needs_review' AND COALESCE(a.error_code, '') NOT IN ('needs_answers', 'fit_disagreement')
+             ORDER BY a.id DESC LIMIT ?""", (limit,))
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        detail = " ".join((r["error_message"] or "").split())
+        kind = "apply" if detail.startswith("no automated submit") else "verify" if detail.startswith("interrupted") else "other"
+        out.append(ParkedRow(r["job_id"], r["title"] or "(unknown)", r["company"] or "", r["url"] or "", kind, detail))
+    return out
+
+
 def job_detail(root: str | Path, job_id: str) -> dict[str, Any]:
     """Everything known about one job: the application row, the posting, the fit verdict, the answers and the agent's steps."""
     root = Path(root)

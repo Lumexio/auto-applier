@@ -64,3 +64,59 @@ dist/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Your source of truth: resumes, notes and what is computed from them (personal)
+/me/
+
+# ---------------------------------------------------------------------------
+# AI coding assistants and "vibe coding" tools
+# Instruction files, rules, prompts, plans and memory banks that a tool reads or writes while it helps with the code.
+# They are working notes for that tool, not part of the project, and they tend to carry personal paths and prompts.
+# Each pattern matches at any depth (Gemini CLI and Claude Code read these from sub-folders too).
+# To publish one on purpose: git add -f <file>
+# ---------------------------------------------------------------------------
+# Google Gemini (CLI, Code Assist, Antigravity, Jules)
+GEMINI.md
+gemini.md
+.gemini/
+.geminiignore
+.agent/
+.agents/
+.antigravity/
+# Claude Code / Anthropic
+CLAUDE.md
+CLAUDE.local.md
+claude.md
+.claude/
+# Generic agent instructions (OpenAI Codex, Jules, Amp, Factory ...)
+AGENTS.md
+agents.md
+.codex/
+# Cursor, Windsurf, Cline / Roo, Kiro, Trae, Aider, Continue, GitHub Copilot
+.cursor/
+.cursorrules
+.cursorignore
+.cursorindexingignore
+.windsurf/
+.windsurfrules
+.clinerules
+.clinerules/
+.roo/
+.roorules
+.roomodes
+.kiro/
+.trae/
+.aider*
+.continue/
+.copilot/
+.github/copilot-instructions.md
+.github/instructions/
+.github/prompts/
+# Prompt scratchpads, spec-driven tooling and "memory bank" notes
+*.prompt.md
+PROMPT.md
+PROMPTS.md
+prompts/
+.prompts/
+memory-bank/
+.specify/
