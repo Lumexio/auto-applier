@@ -16,6 +16,49 @@ from typing import Any
 
 from form_questions import JS_PRELUDE, Question, parse_questions
 
+# Browser-side: which CAPTCHA frames on this page are a CHALLENGE a person must act on? Used by the page snapshot (the agent) and,
+# through CAPTCHA_PROBE_JS, by the form handlers, so both ask the same question.
+#
+# Invisible reCAPTCHA / hCaptcha / Turnstile live in iframes too (Greenhouse puts one on every application form), but they show
+# nothing and score the visitor silently: they are not a challenge and must never stop an application. To a naive check they
+# look like one (a real iframe with a layout box), so each is excluded by what it says about itself or where it sits:
+#   * the reCAPTCHA corner badge (.grecaptcha-badge) and any frame whose address says size=invisible / checkbox-invisible
+#   * frames too small to hold a checkbox (this also covers display:none, which leaves a frame with no size), parked above the
+#     page, or mostly outside the window on either side (the badge hangs off the right edge)
+#   * frames that are hidden: reCAPTCHA keeps its puzzle (bframe) in a wrapper that is visibility:hidden / opacity:0 until it
+#     decides to challenge, so a hidden puzzle is no challenge and a shown one is
+# This only decides whether to STOP. Nothing here solves or avoids a challenge: when one is on screen the application is skipped.
+CAPTCHA_FN = r"""
+  const captchaChallenges = () => {
+    const shown = (el) => {
+      if (getComputedStyle(el).visibility === 'hidden') return false;                 // inherited, so a hidden wrapper is seen here
+      for (let e = el; e && e.nodeType === 1; e = e.parentElement || (e.getRootNode() && e.getRootNode().host)) {
+        if (parseFloat(getComputedStyle(e).opacity) === 0) return false;               // opacity multiplies down the tree
+      }
+      return true;
+    };
+    const found = [];
+    for (const f of deepAll(document, 'iframe')) {
+      const src = f.src || '';
+      if (!/recaptcha|hcaptcha|turnstile|challenges\.cloudflare|captcha/i.test(src)) continue;
+      if (f.closest('.grecaptcha-badge') || /[?&#]size=invisible/i.test(src) || /frame=checkbox-invisible/i.test(src)) continue;
+      const r = f.getBoundingClientRect();
+      if (r.width < 100 || r.height < 40) continue;
+      if (r.bottom + window.scrollY <= 0) continue;
+      const onScreen = Math.min(r.right, window.innerWidth) - Math.max(r.left, 0);
+      if (onScreen < r.width * 0.6) continue;
+      if (!shown(f)) continue;
+      found.push({
+        provider: /hcaptcha/i.test(src) ? 'hcaptcha' : /turnstile|challenges\.cloudflare/i.test(src) ? 'turnstile' : /recaptcha/i.test(src) ? 'recaptcha' : 'captcha',
+        kind: /bframe|frame=challenge/i.test(src) ? 'puzzle' : 'checkbox',
+        w: Math.round(r.width), h: Math.round(r.height),
+      });
+    }
+    return found;
+  };
+"""
+CAPTCHA_PROBE_JS = "() => {" + JS_PRELUDE + CAPTCHA_FN + " return captchaChallenges(); }"
+
 _SNAPSHOT_BODY = r"""
   const base = (opts && opts.base) || 1;
   deepAll(document, '[data-aa-act], [data-aa-file]').forEach((e) => {
@@ -67,11 +110,12 @@ _SNAPSHOT_BODY = r"""
   return {
     url: location.href, title: document.title, text, actions, files, errors,
     password: deepAll(document, 'input[type="password"]').some(isVisible),
-    captcha: deepAll(document, 'iframe').some((f) => /recaptcha|hcaptcha|turnstile|captcha/i.test(f.src || '') && isVisible(f)),
+    captcha: captchaChallenges().length > 0,
+    captcha_detail: captchaChallenges().slice(0, 3).map((c) => c.provider + ' ' + c.kind + ' ' + c.w + 'x' + c.h).join(', '),
   };
 """
 
-SNAPSHOT_JS = "(opts) => {" + JS_PRELUDE + _SNAPSHOT_BODY + "}"
+SNAPSHOT_JS = "(opts) => {" + JS_PRELUDE + CAPTCHA_FN + _SNAPSHOT_BODY + "}"
 
 
 @dataclass
@@ -121,6 +165,7 @@ class PageSnapshot:
     errors: list[str] = field(default_factory=list)
     password: bool = False
     captcha: bool = False
+    captcha_detail: str = ""                     # what was seen, e.g. "recaptcha checkbox 304x78": evidence for a skip that looks wrong
     page_type: str = "unknown"
 
     def signature(self) -> str:
@@ -249,6 +294,7 @@ def build_snapshot(raw_frames: list[dict[str, Any]], questions: list[Question]) 
         texts.append(str(fr.get("text", "")))
         snap.password = snap.password or bool(fr.get("password"))
         snap.captcha = snap.captcha or bool(fr.get("captcha"))
+        snap.captcha_detail = snap.captcha_detail or str(fr.get("captcha_detail") or "")
         for e in fr.get("errors", []):
             if e not in snap.errors:
                 snap.errors.append(e)

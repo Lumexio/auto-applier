@@ -193,14 +193,26 @@ class BaseHandler(abc.ABC):
         self._delegate = delegate
         return True
 
+    def _captcha_on_screen(self) -> str | None:
+        """None when no CAPTCHA challenge is showing; otherwise what was seen (possibly empty). Never tries to solve one."""
+        if not (hasattr(self.session, "has_captcha") and self.session.has_captcha()):
+            return None
+        return self.session.captcha_evidence() if hasattr(self.session, "captcha_evidence") else ""
+
+    def _raise_if_captcha(self, where: str) -> None:
+        seen = self._captcha_on_screen()
+        if seen is not None:
+            raise CaptchaEncountered(f"{self.name}: CAPTCHA {where}" + (f" ({seen})" if seen else ""))
+
     def prepare(self, profile: dict[str, Any], job: dict[str, Any], *, checkpoint_callback=None) -> PreparedForm:
-        if hasattr(self.session, "has_captcha") and self.session.has_captcha():
-            raise CaptchaEncountered(f"{self.name}: CAPTCHA detected")
         if hasattr(self.session, "requires_login") and self.session.requires_login():
             raise LoginRequired(f"{self.name}: Login required")
 
         self._job = job
         self._navigate(job["apply_url"])
+        # Only now: before the navigation the tab still shows the PREVIOUS application, whose page (and any CAPTCHA widget on
+        # it) says nothing about this one. Looking there skipped every job after the first one on a site.
+        self._raise_if_captcha("on the application page")
         self._precheck_duplicate()
         if self.before_fill:
             self.before_fill(self.session, job)
@@ -233,8 +245,7 @@ class BaseHandler(abc.ABC):
         )
 
     def submit(self) -> SubmissionResult:
-        if hasattr(self.session, "has_captcha") and self.session.has_captcha():
-            raise CaptchaEncountered(f"{self.name}: CAPTCHA at submit step")
+        self._raise_if_captcha("at the submit step")
         baseline = self._current_url()
         self._click_submit()
         confirmed, evidence = self._observe_outcome(baseline)
@@ -274,6 +285,11 @@ class BaseHandler(abc.ABC):
             errors = self._visible_errors()
             if errors:
                 return False, "form rejected the submit: " + "; ".join(errors[:3])
+            # An invisible CAPTCHA that did not like the visitor shows its puzzle only now, after the click. Nothing is solved
+            # here; and since the click happened the outcome stays "unknown" (which blocks retries), not a skip.
+            seen = self._captcha_on_screen()
+            if seen is not None:
+                return None, "a CAPTCHA challenge appeared after the submit click" + (f" ({seen})" if seen else "") + ", so the application was probably not sent"
             if hasattr(self.session, "wait_for_timeout"):
                 self.session.wait_for_timeout(500)
         return None, "neither a confirmation nor an error appeared"

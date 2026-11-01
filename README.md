@@ -158,7 +158,9 @@ instructions found in page text.
 ## What it is not
 
 - It does not pass CAPTCHAs, bypass bot detection, create accounts or read email verification codes. Those jobs
-  are skipped or parked for you.
+  are skipped or parked for you. It stops for a CAPTCHA only when a person would have to act on one (a checkbox or
+  puzzle on screen), not for the invisible reCAPTCHA that many forms load silently, and a skip records what it saw
+  (for example `recaptcha checkbox 304x78`) so a wrong one can be audited.
 - It does not write your résumé or cover letters (the cover letter is a template in `profile.json`).
 - It is not a guarantee of interviews. It removes the repetitive part so you can spend time on the applications
   that matter.
