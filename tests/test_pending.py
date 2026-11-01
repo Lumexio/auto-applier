@@ -224,3 +224,142 @@ def test_both_scripts_parse_in_windows_powershell():
         )
         r = subprocess.run([exe, "-NoProfile", "-NonInteractive", "-Command", script], capture_output=True, text=True, timeout=60)
         assert r.returncode == 0, f"{name} does not parse: {r.stdout} {r.stderr}"
+
+
+# --------------------------------------------------------------------------- the web UI that opens at login
+
+def _stand_in_for_langflow(status, port=0):
+    """A local server that answers every request with ``status`` (an error page still proves the server is up)."""
+    import http.server
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(status)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def _closed_port():
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _run_gui_pane(folder, url, minutes, while_running=None):
+    """`desk.ps1 -Pane Gui` with a stand-in browser that only records what it is asked to open. Returns (exit code, output, opened)."""
+    exe = shutil.which("powershell.exe") or shutil.which("powershell")
+    folder = Path(folder)
+    log, stub = folder / "opened.txt", folder / "browser.cmd"
+    stub.write_bytes(('@echo %1 >> "' + str(log) + '"').encode("ascii") + bytes([13, 10]))
+    proc = subprocess.Popen(
+        [exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "desk.ps1"), "-Pane", "Gui",
+         "-Url", url, "-OpenWith", str(stub), "-WaitMinutes", str(minutes)],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    if while_running:
+        while_running(proc)
+    out, _ = proc.communicate(timeout=120)
+    import time
+
+    for _ in range(50):                                   # the stand-in browser is started, not waited for
+        if log.exists():
+            break
+        time.sleep(0.1)
+    return proc.returncode, out, (log.read_text(encoding="ascii").split() if log.exists() else [])
+
+
+def test_the_web_ui_opens_once_it_answers_and_not_before():
+    import tempfile
+    import time
+
+    if not (shutil.which("powershell.exe") or shutil.which("powershell")):
+        return
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        port = _closed_port()
+        url = f"http://127.0.0.1:{port}/"
+        servers = []
+
+        def start_later(proc):
+            time.sleep(4)                                                  # Langflow takes a minute or two to start
+            assert proc.poll() is None, "the script gave up, or opened the page, before anything was listening"
+            servers.append(_stand_in_for_langflow(200, port))
+
+        code, out, opened = _run_gui_pane(d, url, 1, start_later)
+        assert code == 0 and opened == [url], (out, opened)
+        assert f"Opened {url}" in out
+        servers[0].shutdown()
+
+
+def test_a_web_ui_that_never_answers_is_not_opened_and_an_error_page_counts_as_answering():
+    import tempfile
+
+    if not (shutil.which("powershell.exe") or shutil.which("powershell")):
+        return
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        code, out, opened = _run_gui_pane(Path(d), f"http://127.0.0.1:{_closed_port()}/", 0.03)             # waits about two seconds
+        assert code == 0 and opened == [] and "did not answer" in out and "so it was not opened" in out
+
+        for status in (404, 500):                                          # a page that errors still means the server is up
+            sub = Path(d) / f"s{status}"
+            sub.mkdir()
+            server = _stand_in_for_langflow(status)
+            try:
+                url = f"http://127.0.0.1:{server.server_address[1]}/"
+                code, out, opened = _run_gui_pane(sub, url, 1)
+                assert code == 0 and opened == [url], (status, out)
+            finally:
+                server.shutdown()
+
+
+def test_only_the_full_desk_starts_the_browser_watcher_and_no_gui_reaches_every_layout():
+    desk = (ROOT / "desk.ps1").read_text(encoding="utf-8")
+    setup = (ROOT / "setup.ps1").read_text(encoding="utf-8")
+    start = desk.index('"-Pane", "Gui"')
+    guard = desk[:start].rsplit("if (", 1)[1].split(")", 1)[0]
+    assert "-not $DaemonOnly" in guard and "-not $NoGui" in guard, "the browser must stay closed for -DaemonOnly and -NoGui"
+    assert desk.index("Waiting for Ollama") < start < desk.index("& $Setup @flags"), "started from the daemon pane, before the services are"
+    assert desk.index("-WindowStyle Hidden", start - 200) < start, "the watcher must not open a console of its own"
+    launch = desk.split("# --------------------------------------------------------------------------- launch the window")[1]
+    assert launch.count("-NoGui") == 2, "both the Windows Terminal layout and the three-window layout must pass -NoGui on"
+    assert "$deskArgs.NoGui = $true" in setup and "[switch]$NoGui" in setup
+    assert '"`"$Self`""' in desk[start - 300:start + 100], "a folder with a space in its name must not break the watcher's command line"
+    port = re.search(r'\[string\]\$Url = "http://localhost:(\d+)"', desk).group(1)
+    assert f'"run_langflow.py", "run", "--port", "{port}"' in setup, "the page that opens must be the one Langflow is started on"
+
+
+def test_enabling_the_desk_remembers_no_gui_and_otherwise_opens_the_browser():
+    import tempfile
+
+    exe = shutil.which("powershell.exe") or shutil.which("powershell")
+    if not exe:
+        return
+
+    def run(env, *flags):
+        r = subprocess.run([exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "setup.ps1"), *flags],
+                           capture_output=True, text=True, timeout=120, env=env)
+        assert r.returncode == 0, r.stdout + r.stderr
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as fake:
+        startup = Path(fake) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+        startup.mkdir(parents=True)
+        env = {**os.environ, "APPDATA": fake}
+        vbs = startup / "AutoApplierDesk.vbs"
+
+        run(env, "-EnableDesk")
+        assert "-NoGui" not in vbs.read_text(encoding="ascii")                                              # the default is to show the web UI
+        run(env, "-EnableDesk", "-NoGui")
+        assert "-NoGui" in vbs.read_text(encoding="ascii") and "-DaemonOnly" not in vbs.read_text(encoding="ascii")
+        run(env, "-EnableDesk", "-DaemonOnly", "-NoGui")
+        assert "-DaemonOnly" in vbs.read_text(encoding="ascii") and "-NoGui" in vbs.read_text(encoding="ascii")
+        run(env, "-DisableDesk")

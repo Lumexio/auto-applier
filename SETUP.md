@@ -515,8 +515,8 @@ the flags below skip the menu.
 | `setup.bat -StopDaemon` | Stop only the daemon |
 | `setup.bat -DryRun` | One dry-run cycle |
 | `setup.bat -EnableAutoStart` / `-DisableAutoStart` | Start everything at Windows login, hidden (adds or removes a script in your Startup folder) |
-| `setup.bat -Desk` | Open the desk now: dashboard, what is waiting for you, and the daemon log, tiled in one Windows Terminal window |
-| `setup.bat -EnableDesk` / `-DisableDesk` | Open the desk at every Windows login and start the services there (replaces `-EnableAutoStart`; add `-DaemonOnly` to leave out the API and Langflow) |
+| `setup.bat -Desk` | Open the desk now: dashboard, what is waiting for you, and the daemon log, tiled in one Windows Terminal window; the Langflow web UI opens in your default browser once it answers (`-NoGui` leaves the browser out) |
+| `setup.bat -EnableDesk` / `-DisableDesk` | Open the desk at every Windows login and start the services there (replaces `-EnableAutoStart`; add `-DaemonOnly` to leave out the API, Langflow and the browser, or `-NoGui` to leave out only the browser) |
 | `setup.bat -Login "<url>"` | Open the login browser for a site |
 | `setup.bat -SyncCookies` | Import cookies from your personal Firefox |
 | `setup.bat -Test` | Run the test suite |
@@ -658,6 +658,10 @@ sent but never confirmed). It is read-only and uses the same data as the dashboa
 `setup.bat -Desk` opens the **desk**: one Windows Terminal window with the live dashboard on the left, this list on the top
 right (refreshed every minute) and the daemon on the bottom right. That last pane starts the services if they are not
 running and then follows `daemon.log`. Closing the window does not stop anything.
+
+The Langflow web UI (http://localhost:7860), the one graphical interface the project has, opens in your default browser as soon
+as it answers; it needs a minute or two to start, and the page opens by itself when it is ready. The REST API on port 8000 has
+no screen, so nothing opens for it. `-NoGui` leaves the browser out; `-DaemonOnly` leaves out Langflow and with it the browser.
 
 `setup.bat -EnableDesk` does this at every Windows login, so the first thing you see after logging in is what is pending and
 the project running. Things to know:

@@ -6,7 +6,8 @@
 #   ./setup -StopAll              (Stop all background services)
 #   ./setup -EnableAutoStart      (Enable auto-start on Windows PC boot/login)
 #   ./setup -DisableAutoStart     (Disable auto-start on Windows PC boot/login)
-#   ./setup -Desk                 (Open the desk now: dashboard + what is pending + the daemon log, in Windows Terminal)
+#   ./setup -Desk                 (Open the desk now: dashboard + what is pending + the daemon log, in Windows Terminal; and the
+#                                  Langflow web UI in your browser once it answers. Add -NoGui to leave the browser out)
 #   ./setup -EnableDesk           (Open the desk at every Windows login and start the services; replaces -EnableAutoStart)
 #   ./setup -DisableDesk          (Stop opening the desk at login)
 #   ./setup -Daemon -Background   (Start background detached daemon)
@@ -41,6 +42,7 @@ param (
     [switch]$EnableDesk,
     [switch]$DisableDesk,
     [switch]$DaemonOnly,
+    [switch]$NoGui,
     [string]$Login = "",
     [string]$Browser = "firefox"
 )
@@ -317,7 +319,7 @@ function Set-DeskAutoStart ([bool]$Enable) {
 
     if ($Enable) {
         $deskScript = Join-Path $ProjectDir "desk.ps1"
-        $extra = if ($DaemonOnly) { " -DaemonOnly" } else { "" }
+        $extra = $(if ($DaemonOnly) { " -DaemonOnly" } else { "" }) + $(if ($NoGui) { " -NoGui" } else { "" })
         # Starts hidden; desk.ps1 then opens the Windows Terminal window (no console flash of its own)
         $vbsLines = @(
             'Set objShell = CreateObject("Wscript.Shell")',
@@ -456,6 +458,7 @@ if ($DisableAutoStart) {
 if ($Desk) {
     $deskArgs = @{}
     if ($DaemonOnly) { $deskArgs.DaemonOnly = $true }
+    if ($NoGui) { $deskArgs.NoGui = $true }
     & (Join-Path $ProjectDir "desk.ps1") @deskArgs
     exit 0
 }
