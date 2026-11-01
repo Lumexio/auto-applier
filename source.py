@@ -38,13 +38,17 @@ A technology your resumes list but no dated job names counts as your career leng
 
 
 def load_config(path: str = "config.yaml") -> dict[str, Any]:
+    """config.yaml with config.local.yaml (yours, never committed) merged on top."""
     import yaml
 
+    from config_loader import load_config as load_merged
+
+    if not Path(path).is_file():
+        raise SystemExit(f"Could not read {path}: no such file")
     try:
-        data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError) as e:
+        return load_merged(path)
+    except (OSError, ValueError, yaml.YAMLError) as e:
         raise SystemExit(f"Could not read {path}: {e}")
-    return data if isinstance(data, dict) else {}
 
 
 def need_source_dir(cfg: dict[str, Any]) -> Path:
@@ -67,9 +71,12 @@ def cmd_init(cfg: dict[str, Any], _args: argparse.Namespace) -> int:
 
 def cmd_sync(cfg: dict[str, Any], args: argparse.Namespace) -> int:
     root = need_source_dir(cfg)
-    origin = Path(args.origin or rf.source_cfg(cfg)["sync_from"])
+    given = args.origin or rf.source_cfg(cfg)["sync_from"]
+    if not given:
+        raise SystemExit("Say where your resumes are: python source.py sync --from <folder>   (or set source.sync_from in config.local.yaml)")
+    origin = Path(given)
     if not origin.is_dir():
-        raise SystemExit(f"{origin} does not exist. Pass the resume-template folder: python source.py sync --from <folder>")
+        raise SystemExit(f"{origin} does not exist. Pass the folder your resumes are in: python source.py sync --from <folder>")
     dest = root / "resumes"
     dest.mkdir(parents=True, exist_ok=True)
     wanted: list[tuple[Path, str]] = []

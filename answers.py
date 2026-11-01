@@ -29,9 +29,9 @@ def _config(path: str) -> dict:
     p = Path(path)
     if not p.is_file():
         return {}
-    import yaml
+    from config_loader import load_config
 
-    return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    return load_config(p)
 
 
 def _store(cfg: dict) -> StateStore:

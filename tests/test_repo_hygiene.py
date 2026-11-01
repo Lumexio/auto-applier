@@ -14,7 +14,7 @@ GIT = shutil.which("git")
 PERSONAL = [
     "profile.json", "facts.yaml", ".api_token", ".env", "state.db", "state.db-wal", "jobs.json", "daemon.log", ".daemon.pid",
     ".browser_profile/cookies.sqlite", "applications/job-1/trace/step-1.png",
-    "me/resumes/resume-backend.md", "me/derived/experience.yaml", "me/experience/notes.md",
+    "me/resumes/resume-backend.md", "me/derived/experience.yaml", "me/experience/notes.md", "config.local.yaml",
 ]
 ASSISTANT_FILES = [
     "GEMINI.md", "gemini.md", "sub/dir/GEMINI.md", ".gemini/settings.json", ".geminiignore", ".agent/rules.md", ".agents/plan.md", ".antigravity/state.json",

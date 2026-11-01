@@ -68,6 +68,9 @@ desktop.ini
 # Your source of truth: resumes, notes and what is computed from them (personal)
 /me/
 
+# Your settings, merged over config.yaml (personal: your models, the companies you watch ...)
+config.local.yaml
+
 # ---------------------------------------------------------------------------
 # AI coding assistants and "vibe coding" tools
 # Instruction files, rules, prompts, plans and memory banks that a tool reads or writes while it helps with the code.

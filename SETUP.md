@@ -77,12 +77,20 @@ You write two files. They are the *only* things the bot is allowed to say about 
 
 ### 3.1 `profile.json`: who you are and what you want
 
-> **Note:** `profile_gen.py` (which `setup.ps1` runs when `profile.json` is missing) builds a profile from a résumé
-> folder laid out as `resume-versions/resume-backend.md` (an HTML-flavoured Markdown résumé) plus
-> `out/resume-base.pdf`. It looks for that folder in `./resume-template`, or wherever the `AUTO_APPLIER_RESUME_DIR`
-> environment variable points. Anything the résumé does not state (location, work authorization, excluded
-> companies, GitHub link) is left empty for you to fill in. Unless your résumé uses that exact layout, it is simpler
-> to create `profile.json` by hand as below.
+Generate it from your résumé, then say what a résumé cannot:
+
+```powershell
+python profile_gen.py --resume my-resume.md --location "Lisbon, Portugal" --authorized PT --min-salary 60000 --currency EUR --seniority mid --remote yes
+```
+
+`profile_gen.py` (which `setup.ps1` also runs when `profile.json` is missing) reads a `.md`, `.html` or `.txt` résumé, or a folder of
+résumé versions. It looks where you point it with `--resume`, then in `AUTO_APPLIER_RESUME_DIR` (default `./resume-template`),
+then in `me/resumes`. From the résumé it takes your name, email, phone, links and the technologies listed in its skills section,
+**and nothing else**: no skill is added for you. What a résumé cannot say (where you live, where you may work, the pay you need,
+your level, whether remote is fine) stays empty unless you give the option shown above, and the command lists what is still
+empty, because a wrong guess would be sent to employers. `--exclude-company` and `--exclude-keyword` (repeatable) fill the
+exclusions. The profile it writes starts in `dry_run` (forms are filled in, nothing is submitted): change `mode` when you have
+watched a few runs. It never overwrites an existing `profile.json` without `--force`. Or write the file by hand:
 
 Create `profile.json` in the project folder:
 
@@ -106,7 +114,7 @@ Create `profile.json` in the project folder:
   "github": "https://github.com/your-handle",
   "exclusions": {
     "companies": ["Some Company I Won't Work For"],
-    "keywords": ["unpaid", "commission-only", "clearance required"],
+    "keywords": ["unpaid", "commission-only"],
     "domains": []
   },
   "attachments": {
@@ -128,7 +136,7 @@ Create `profile.json` in the project folder:
 | `exclusions.companies / keywords / domains` | Never apply to these |
 | `attachments.resume_path` | Absolute path to the résumé PDF that gets uploaded. **Required**: a form that needs a file and has none configured is parked, never submitted without it |
 | `attachments.cover_template` | Cover-letter text for forms that have a cover-letter box |
-| `mode` | `autonomous`, `assisted` or `dry_run` (see below). Optional; falls back to `stage3.mode` in `config.yaml` |
+| `mode` | `autonomous`, `assisted` or `dry_run` (see below). A generated profile starts as `dry_run`; leave it out to follow `stage3.mode` in the config |
 | `max_applications_per_day`, `max_applications_per_domain_per_hour` | Optional overrides of the caps in `config.yaml` |
 
 Optional keys for the relevance gate: `target_titles` (title words you want), `title_exclusions` (title words to
@@ -162,7 +170,22 @@ Rules the bot follows:
 
 ## 4. Configure
 
-`config.yaml` is commented inline. The settings you will most likely touch:
+`config.yaml` holds the defaults every user starts from and is commented inline. **Put your own changes in `config.local.yaml`**
+next to it (create it yourself). It is never committed and is merged over the defaults, so a `git pull` can update the defaults
+without touching your setup:
+
+```yaml
+# config.local.yaml: only what differs from config.yaml
+stage1:
+  target_urls:                          # a list replaces the default list as a whole, so repeat what you want to keep
+    - "https://www.linkedin.com/jobs/"
+    - "https://boards.greenhouse.io/<company>"
+stage3:
+  rate_limit: {global_per_day: 10}      # inside a section only the keys you write change
+```
+
+Everywhere this guide says "in `config.yaml`", the same setting works in `config.local.yaml`, and that is where it belongs.
+The settings you will most likely touch:
 
 ### Job sources: `stage1.target_urls`
 
@@ -253,7 +276,7 @@ llm:
 ### Using more than one model (optional)
 
 By default one model does every job. If you have several models installed you can give each job to the one that is
-best at it. This is a `models:` block in `config.yaml`, commented out in the shipped file:
+best at it. This is a `models:` block, off in the shipped `config.yaml` because it depends on what you have installed. Put yours in `config.local.yaml`:
 
 ```yaml
 models:
@@ -702,7 +725,7 @@ python -m pytest tests -q
 python run_tests.py
 ```
 
-The suite (282 tests with pytest; `run_tests.py` runs 281, skipping the one that needs the dashboard environment) includes real-browser tests against a fake application server. It takes a few minutes.
+The suite (294 tests with pytest; `run_tests.py` runs 293, skipping the one that needs the dashboard environment) includes real-browser tests against a fake application server. It takes a few minutes.
 Tests that need a Playwright browser are skipped if none is installed. The suite is built around local fake
 servers and stubbed models, so it does not need Ollama or an internet connection.
 
