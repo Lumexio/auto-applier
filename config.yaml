@@ -185,6 +185,6 @@ fit:
                                  # is parked for you; your own facts waive vetoes they already answer. Decide with: python fit_review.py list
 
 outreach:
-  enabled: false         # OFF until recruiter detection/status handling is fixed (it mis-reported every attempt as already_connected)
+  enabled: false         # OFF: no approval step exists yet, so nothing it would send is shown to you first. Leave it off
   max_per_day: 5
   template: "Hi {recruiter_name}, I applied for the {job_title} role at {company}. With my background in {skill}, I'd love to connect. Best, {candidate_name}."

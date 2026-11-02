@@ -7,9 +7,11 @@ until you stop it or shut the PC down.
 There is no cloud AI behind it. The language model is a small open model (default: `qwen2.5:7b`) served locally
 by [Ollama](https://ollama.com), and everything that matters for safety is decided by ordinary code, not by the model.
 
-> **Status:** active development. The pipeline, the answer engine and the safety rails are covered by 294
-> automated tests, but a brand-new install has no application history, so **every kind of site starts on
-> probation** (filled in and reviewed, not submitted) until you approve it. See [Safety model](#safety-model).
+> **Status:** MVP. The whole loop works end to end: find, filter, check fit, answer, fill in, submit, verify, and
+> hand you whatever needs a person. The pipeline, the answer engine, the agent and the safety rails are covered by
+> 455 automated tests, but a brand-new install has no application history, so **every kind of site starts on
+> probation** (filled in and reviewed, not submitted) until you approve it. See [What the MVP includes](#what-the-mvp-includes)
+> for exactly what is in and what is not, and the [Safety model](#safety-model).
 > Setup instructions are in **[SETUP.md](SETUP.md)**.
 
 ---
@@ -56,6 +58,57 @@ This project takes the opposite approach:
 3. **Stage 3: applying.** For the few jobs that survive (at most the daily cap), a local-model **fit check** reads
    the real posting text, the form is opened and filled, and the result is verified against what the page says.
 
+## What the MVP includes
+
+The loop below is built, tested and run by the daemon today. Each row points at the section that explains it.
+
+### Features
+
+| Area | What you get | Details |
+|---|---|---|
+| **Job discovery** | Public Greenhouse and Lever boards through their APIs (no login). LinkedIn, Handshake and any other URL through a browser that keeps its own logged-in profile. Optional cookie import from your Firefox. | [Job discovery](#job-discovery) |
+| **Filtering** | Duplicates across runs, jobs already applied to, expired postings, scam phrases, excluded companies and keywords, salary floor, title relevance (field and seniority) and a skill-match score. Plain rules, no model, every drop explained in the log. | [Filtering and fit](#filtering-and-fit) |
+| **Location filter** | Drops postings you could not take up (remote only elsewhere, on-site where you do not live, "must reside in X"), reads a work mode written in the title ("... - Hybrid"), and keeps whatever it cannot read for the fit check. | [Filtering and fit](#filtering-and-fit) |
+| **Fit check** | A local model reads the real posting. A deal-breaker only counts if it can be quoted word for word, your own facts waive vetoes they already answer, a second model can confirm the rest, and you can overrule any veto. | [Filtering and fit](#filtering-and-fit) |
+| **Source of truth** | Your resume versions in `me/` become years per technology, highest finished degree, GPA, first-degree year and employer counts, each with where it came from. Contradictions between versions are reported; `facts.yaml` always wins. | [Your source of truth](#your-source-of-truth) |
+| **Answering questions** | Only from `facts.yaml`, your saved answers and your own resumes and notes (quoted, checked, then confirmed by a second model call). Consent boxes are ticked, marketing opt-ins never; a few questions are never answered for you; a required question nobody can answer parks the job and is listed once. | [Answering application questions](#answering-application-questions) |
+| **Resume per job** | If you keep `resume-frontend.pdf` beside `resume-base.pdf`, the version that fits the job title is attached; anything unclear gets your default. | [Your source of truth](#your-source-of-truth) |
+| **Application engines** | Dedicated handlers for Greenhouse, Lever, Workday, LinkedIn Easy Apply and Handshake Quick Apply. For every other site an observe, decide, act, verify agent, which also takes over when a handler finds nothing it knows. A trace with a screenshot per step, and a failure picture when something goes wrong. | [Handling any site](#handling-any-site-the-application-agent) |
+| **Several local models** | Each job (fit, form questions, essays, verification, buttons) can go to the installed model that suits it. A missing or failing model falls back to the main one, and a model that keeps failing is left alone for a while. | [Several local models](#several-local-models-optional) |
+| **Safety rails** | Probation per kind of site, dry run that always wins, a daily cap and per-site limits, duplicate protection, submission only on page evidence, crash recovery and an audit trail. | [Safety and reliability](#safety-and-reliability) |
+| **Dashboards** | A terminal dashboard, a web page for everything that needs you (answer, decide, trust a site, finish by hand), a one-screen pending list, and a desk that tiles them with the daemon log. Both dashboards warn when a model has been stopped or when you edited the config after the daemon loaded it. | [Interfaces](#interfaces) |
+| **Control** | Commands for the daemon, answers, site trust, fit vetoes and your source of truth; a local REST API; an optional Langflow pipeline. | [Everyday commands](#everyday-commands) |
+| **Running it** | `setup.bat -All` starts everything and opens it; `-All -Background` starts it silently; `-EnableDesk` does it at every Windows login. Your settings live in `config.local.yaml`, so updating the project never touches them. | [Quick start](#quick-start) |
+
+### Properties
+
+| Property | What it means |
+|---|---|
+| **Local only** | No cloud AI, no accounts, no API keys. The model runs in Ollama on this computer; the only outbound traffic is to the job sites. |
+| **Private by default** | Your profile, facts, resumes, database, sessions and token are git-ignored (a test fails if one is tracked). The REST API, the web interface and the dashboards answer on this computer only; the API needs a token and the web page a per-run one. |
+| **Grounded** | Nothing is guessed. Every answer comes from a source you own, and the application records which one (fact sheet, saved answer, computed from a dated resume, or the file and line a draft was quoted from). |
+| **The model never decides alone** | It chooses only among options code already judged safe, a veto needs a quote that exists in the posting, a button choice must survive several menu orders, and code, not the model, classifies buttons and decides whether an application went through. |
+| **Fails safe** | Unknown means parked, never guessed. A site starts on probation, a dry run beats every other setting, a model outage skips a job for now without using up an attempt, and an application that was clicked but not confirmed is never retried. |
+| **Never twice** | Duplicates are caught across cycles and restarts; `unconfirmed` stays unconfirmed until you decide. |
+| **Auditable** | A folder per job (screenshots, answers with sources, fit verdict, agent trace), a SQLite history of runs, attempts and events, and a log line with the reason for every drop. |
+| **Unattended** | Single-instance lock, graceful shutdown, interrupted work parked for review, an Ollama wait at login, circuit breaker for failing models, and a status file the dashboards read to tell you when it needs a restart. |
+| **Modest hardware** | Works with one 7B model on 8 GB of VRAM (about 3 seconds per short call) or on a CPU, inside Ollama's default 2048-token window. |
+| **Yours to configure** | Defaults in `config.yaml`, your own changes in `config.local.yaml`; per-site, per-model, per-filter switches; MIT licensed. |
+| **Tested** | 455 tests, including real browsers driven against a fake application server. They need neither Ollama nor an internet connection. |
+| **Platform** | Windows 11 and Python 3.14. The Python core is portable; the launcher, desk and login entry are Windows-only. |
+
+### Not in the MVP yet
+
+| Left out | Why, and what to do meanwhile |
+|---|---|
+| Recruiter outreach | Built but **off** (`outreach.enabled: false`). A draft-and-approve queue, so that nothing is ever sent without your OK, comes first. |
+| Reading PDF and DOCX resumes | PDFs are attached to applications but never read; keep a `.md` or `.html` version in `me/` for the computed facts. |
+| Re-checking `unconfirmed` applications | They are listed for you to check by hand (web interface, tab *Not confirmed*). Nothing looks them up automatically. |
+| File pickers that are not a plain upload field | The agent uploads through ordinary `<input type="file">` fields. A custom picker is not handled yet: read `applications/<job>/trace/` to see where such a job stopped. |
+| CAPTCHAs, new accounts, email codes | Never, by design: those jobs are skipped or parked for you. |
+| Writing your resume or cover letters | The cover letter is a template in `profile.json`. |
+| A launcher outside Windows | Run `python daemon.py` and the commands in [Everyday commands](#everyday-commands) directly. |
+
 ## Features
 
 ### Job discovery
@@ -68,7 +121,8 @@ This project takes the opposite approach:
 - **Location filter** (`stage2.location`), driven by your `facts.yaml`: where you live, which countries you may work in
   and whether you would relocate. It drops "Remote - Spain", "London" or "Austin, TX (Hybrid)" and postings whose text
   says "must reside in the United States" before any model reads them, and keeps anything it cannot read (a bare
-  "Remote", an unknown city) for the fit check. Every cycle's log lists a few drops so a wrong one is easy to spot.
+  "Remote", an unknown city) for the fit check. A work mode written at the end of the title ("Backend Engineer - Hybrid",
+  "Engineer (Remote)") counts like one in the location field. Every cycle's log lists a few drops so a wrong one is easy to spot.
 - **Model-based fit scoring** on the actual posting text, cached per posting/profile/model. It judges what the
   cheap rules cannot, such as location, remote policy and work authorization, against your facts. A "deal-breaker" only
   vetoes a job if the model can quote it **verbatim** from the posting, so a small model cannot invent a reason
@@ -155,10 +209,16 @@ This project takes the opposite approach:
   disagreed about, look at the filled-in forms of a site on probation and trust it, and finish by hand the jobs that send you to
   the company's own site. Every button does what the matching command does; nothing is submitted from the page. Listens on this
   computer only.
-- **CLI** for the daemon, answers and site trust.
+- **Pending list** (`python pending.py`): one screen of everything only you can do, each item with the command or link for it.
+- **The desk** (`setup.bat -Desk`, or `setup.bat -All`): the dashboard, the pending list and the daemon log tiled in one Windows
+  Terminal window, with the web interface and Langflow opening in your browser. `-EnableDesk` does it at every Windows login.
+- **Health warnings** in both dashboards: the daemon writes a small `status.json` (its process id, the config's path, model names and a fingerprint per config section; no personal data), and the dashboards use it to
+  say when a model has been stopped for repeated failures (its jobs use the main model meanwhile) and when `config.yaml` or
+  `config.local.yaml` was edited after the daemon loaded it, which needs a restart to take effect.
+- **CLI** for the daemon, answers, site trust, fit vetoes and your source of truth.
 - **Local REST API** (loopback only, bearer-token protected) for profile, status, scrape/filter/apply.
 - **Langflow** visual pipeline (optional) with ready-made components.
-- **Windows helper** (`setup.ps1`) to start/stop services and auto-start them at login.
+- **Windows helper** (`setup.ps1`) to start/stop services, open the desk and auto-start it at login.
 
 ## Safety model
 
@@ -230,29 +290,35 @@ Then run it for real: `setup.bat -All` starts everything and opens the dashboard
 | `python daemon.py --sync-cookies` | Import cookies from your personal Firefox profile |
 | `python answers.py pending` | Required questions that blocked applications |
 | `python answers.py set "<question>" "<answer>" --requeue` | Answer once for all future applications |
+| `python answers.py approve "<question>" [--text "..."] [--all-verified] --requeue` | Accept the draft the bot wrote from your resumes (or your own wording) |
+| `python answers.py facts-init` | Write a starter `facts.yaml` from your profile (never overwrites) |
 | `python sites.py list` / `approve <site>` / `revoke <site>` | Manage which sites may be submitted to |
 | `python fit_review.py list` / `show` / `approve <job>` / `reject <job>` | See postings the models vetoed or disagreed about, and overrule them |
-| `python source.py sync` / `show` / `check` | Copy your resumes into `me/`, see the years the bot computes from them and why, find contradictions |
+| `python source.py init` / `sync` / `show` / `check` / `derive` | Create `me/`, copy your resumes into it, see the years, degrees and employer counts the bot computes from them and why, find contradictions, recompute now |
 | `python pending.py [--watch 60]` | One screen of everything waiting for you, with the command or link for each |
 | `gui.bat` | The web interface for what needs you: answer, decide, finish by hand (`--demo` for made-up data, `--port N`) |
+| `setup.bat -All` | Start the daemon, web interface, REST API and Langflow, and open the desk (the same as `-Desk`; `-NoGui` skips the browser) |
+| `setup.bat -All -Background` | The same services, silently, with nothing opened |
 | `setup.bat -Desk` / `-EnableDesk` | Open dashboard + pending list + daemon log in one terminal window, and the web interface and Langflow in your browser, now / at every Windows login (`-NoGui` skips the browser) |
 | `tui.bat` | Live terminal dashboard (`--demo` for made-up data, `--once` to print a text snapshot) |
 | `python api.py --port 8000` | Local REST API |
-| `setup.bat -Status` | Show daemon / API / Langflow state |
+| `setup.bat -Status` / `-StopAll` | Show daemon / web interface / API / Langflow state, or stop them all |
 | `python -m pytest tests -q` | Run the test suite |
 
 ## Project layout
 
 | Path | Purpose |
 |---|---|
-| `daemon.py` | The loop: scheduling, locking, signals, stage 1→2→3 per cycle |
+| `daemon.py`, `daemon_status.py` | The loop (scheduling, locking, signals, stage 1→2→3 per cycle), and the `status.json` it writes for the dashboards |
 | `scraper.py`, `job_text.py` | Greenhouse / Lever / browser ingestion and text cleanup |
 | `stage2_filter/` | Normalise, dedupe, filter, relevance, rank |
 | `stage3_apply/` | Application runner, rate limiter, confirmation checks |
 | `stage3_apply/ats_handlers/` | Greenhouse, Lever, Workday, LinkedIn, Handshake and the agent handler |
 | `agent.py`, `page_state.py` | The application agent and the page/button classifier |
 | `form_questions.py`, `answerer.py`, `facts.py`, `answers.py` | Reading form fields and answering from your facts |
-| `fit.py`, `llm_client.py` | Model-based fit scoring and the local-model client |
+| `evidence.py` | Answers drafted from your own resumes and notes: quoted, checked in code, confirmed by a second model call |
+| `resume_pick.py` | Which resume version goes with which job |
+| `llm_client.py` | The local-model client: roles, fallbacks, the circuit breaker for failing models |
 | `state.py`, `schema.sql`, `sites.py` | SQLite state, migrations, site trust (probation) |
 | `fit.py`, `fit_review.py` | Model fit scoring (facts check, second opinion) and the command to overrule it |
 | `api.py` | Local REST API |
@@ -260,10 +326,11 @@ Then run it for real: `setup.bat -All` starts everything and opens the dashboard
 | `tui/`, `tui.bat` | Read-only terminal dashboard (data and rendering use only the standard library and `rich`; the Textual app runs in its own `.venv-tui`) |
 | `profile_gen.py` | Builds `profile.json` from your resume; leaves empty whatever the resume does not state |
 | `config.yaml`, `config_loader.py` | The shared defaults, and the loader that merges your own `config.local.yaml` (never committed) over them |
-| `resume_facts.py`, `source.py` | Reads the resumes in `me/` and computes years per technology with provenance; the command to sync / show / check them |
+| `resume_facts.py`, `source.py` | Reads the resumes in `me/` and computes years per technology, degrees, GPA and employer counts with provenance; the command to sync / show / check them |
 | `pending.py`, `desk.ps1` | The "what is waiting for you" screen, and the Windows Terminal layout that shows it with the dashboard and the daemon log |
 | `langflow_components.py`, `run_langflow.py`, `auto_applier_flow.json` | Optional visual pipeline |
 | `outreach.py` | Recruiter outreach (disabled by default) |
+| `import_profile.py`, `backfill_history.py` | Cookie import from your Firefox profile; a one-off repair of application history, kept for reference |
 | `stage1_generate/` | Experimental sandboxed scraper-code generator (not part of the daemon loop) |
 | `applier.py`, `store.py` | The original standalone prototype, kept for reference |
 | `tests/` | Test suite, including a fake application server driven by real browsers |
@@ -282,7 +349,8 @@ Then run it for real: `setup.bat -All` starts everything and opens the dashboard
 
 ## Documentation
 
-- **[SETUP.md](SETUP.md)** for installation, configuration, first run, running as a service, tuning and troubleshooting.
+- **[SETUP.md](SETUP.md)** for installation, configuration, first run, running as a service, the dashboards, tuning and troubleshooting.
+- **[What the MVP includes](#what-the-mvp-includes)** above is the list of what is built, the properties it keeps, and what is left out.
 - `config.yaml` is commented inline; every option is explained next to its value. Change settings in `config.local.yaml`, not in `config.yaml`.
 
 ## License

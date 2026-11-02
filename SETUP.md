@@ -1,7 +1,8 @@
 # Setup Guide
 
 How to install, configure and run the AI Auto Job Applier. For what the project is and why it behaves the way it
-does, read the [README](README.md) first.
+does, read the [README](README.md) first; its section [What the MVP includes](README.md#what-the-mvp-includes) lists what is built, the
+properties it keeps and what is left out.
 
 **Contents**
 1. [Requirements](#1-requirements)
@@ -136,6 +137,7 @@ Create `profile.json` in the project folder:
 | `exclusions.companies / keywords / domains` | Never apply to these |
 | `attachments.resume_path` | Absolute path to the résumé PDF that gets uploaded. **Required**: a form that needs a file and has none configured is parked, never submitted without it |
 | `attachments.cover_template` | Cover-letter text for forms that have a cover-letter box |
+| `attachments.resumes`, `attachments.resume_rules` | Optional, for [several resume versions](#several-resume-versions): `{name: path}` of your PDFs, and `{name: [words]}` that make a job title or posting name that kind |
 | `mode` | `autonomous`, `assisted` or `dry_run` (see below). A generated profile starts as `dry_run`; leave it out to follow `stage3.mode` in the config |
 | `max_applications_per_day`, `max_applications_per_domain_per_hour` | Optional overrides of the caps in `config.yaml` |
 
@@ -236,6 +238,7 @@ tell where you live it does nothing.
 | Remote, tied to a country you may work in (`Remote - US`) | kept, or dropped with `remote_authorized: drop` |
 | On-site or hybrid in another city of your own country (`Hybrid - Mexico City`) | dropped unless it is your city; a bare `Mexico City` (no mode stated) is kept |
 | `Hybrid` / `In-Office` with no place named | dropped (you would have to be there, and nothing says where) |
+| A work mode at the end of the **title** (`Backend Engineer - Hybrid`, `Engineer (Remote)`) while the location names none | the title's mode is used as if the location had said it; a title naming both (`(Hybrid or Remote)`), or a mode in the middle of a phrase (`Engineer - Hybrid Cloud Platform`), says nothing |
 | A bare `Remote`, `Distributed`, an unknown city or empty | kept: the fit check judges it |
 | The text says you must live in the United States / Germany / ... and names no place you live | dropped, unless the text also names your country |
 
@@ -261,7 +264,17 @@ stage3:
     per_domain_per_hour: 5
     min_delay_seconds: 5        # random pause between applications
     max_delay_seconds: 15
+  resume_per_job: true          # attach the resume version that fits the job (resume-frontend.pdf for a frontend title); false = always the default
 ```
+
+#### Several resume versions
+
+If you keep more than one PDF, name them `resume-<kind>.pdf` next to the default one (`resume-frontend.pdf` beside `resume-base.pdf`), or list them in
+`profile.json` under `attachments.resumes` (`{"frontend": "C:/path/resume-frontend.pdf"}`). The version that fits the job is uploaded, decided by plain keywords and
+no model: the job **title** first ("Frontend Engineer" picks `frontend`, "Backend Engineer" picks `backend`); only when the title names neither, the posting text,
+and then only if it clearly leans one way (at least 4 keyword hits and twice the other kind's). Anything unclear (a "Full Stack" title, a tie, a kind you
+have no PDF for) gets your default, `attachments.resume_path`, never the other kind. Replace the keywords per kind with `attachments.resume_rules`
+(`{"frontend": ["react", "ui"]}`). `resume_per_job: false` always uploads the default. When a version other than the default is attached, the daemon log says which (`[Stage 3] Resume for this job: frontend version (resume-frontend.pdf)`).
 
 ### The model
 
@@ -366,7 +379,8 @@ agent:
     clean_runs_to_trust: 3      # 0 = only your approval (or a confirmed submission) can trust a site
 ```
 
-Leave `outreach.enabled: false`. Recruiter outreach is disabled until its detection is fixed.
+Leave `outreach.enabled: false`. Recruiter outreach is the least finished part: it has no approval step yet, so nothing it would send
+is shown to you first. It stays off until a draft-and-approve queue exists.
 
 ## 5. Log in to the sites you use
 
@@ -415,6 +429,7 @@ Each job gets a folder, `applications/<job>/`:
 | `fit.json` | The fit assessment: score, verdict, deal-breakers (with the quote) |
 | `trace/` | For jobs the agent handled: `steps.jsonl` and one screenshot per step |
 | `probation.json` | Written when a site is on probation: why it was held and how to release it |
+| `failure.png`, `failure.json` | Written when an application went wrong: what the page looked like and what was happening. The web interface shows them next to the failed job |
 
 Check that names, contact details, the résumé upload and the answers are right. Then look at the overall state:
 
@@ -555,6 +570,18 @@ After a crash, anything that was mid-application is parked as `needs_review` rat
 
 > After changing code or `config.yaml`, restart the daemon: `setup.bat -StopAll`, then `setup.bat -All -Background`.
 
+**The daemon tells the dashboards when it needs you.** While it runs it keeps a small `status.json` beside `state.db` (written every few
+seconds, replaced in one step, removed when the daemon exits cleanly). It holds the daemon's process id, which config files it loaded
+(a fingerprint per section, not the content) and which models it has stopped asking. The terminal dashboard and the web interface read it,
+and only trust it while that process still holds the lock. They show two kinds of warning:
+
+* **"config edited since the daemon started (llm, stage3)"**: the daemon reads `config.yaml` and `config.local.yaml` once, at start, so it
+  is still running the old settings. The warning names the sections that differ and says how to restart.
+* **"model ... is not answering"**: that model failed twice in a row and is left alone for two minutes (see "A model that keeps failing is
+  left alone"); the line counts down and its jobs use the main model meanwhile. It disappears when the model answers again.
+
+Nothing else uses the file, and a failed write is ignored, so it can never stop a cycle.
+
 ## 9. REST API and Langflow (optional)
 
 ### REST API
@@ -608,6 +635,7 @@ and asks Ollama which models are loaded; it never writes and never touches the d
 | Panel | Shows |
 |---|---|
 | Top line | whether the daemon is running (checked from its lock and process, never by signalling it), which models Ollama has loaded and how much GPU memory they use, the mode, and when the next cycle starts |
+| Warnings (only when there is one) | under the top line, from the daemon's `status.json`: the config was edited after the daemon started (and how to restart it), or a model has been stopped for repeated failures and when it is asked again |
 | Today | submissions in the last 24 hours against `stage3.rate_limit.global_per_day`, today's outcomes, all-time totals and a 7-day sparkline |
 | Latest cycle | the funnel: scraped, what each filter removed, what reached stage 3, and what happened to it |
 | Models | what is loaded now, and each configured role (`models:`) with whether its model is loaded and which tasks use it |
@@ -634,7 +662,8 @@ know it runs, it may be running as another user or in WSL (the process check onl
 
 `gui.bat` (or `python -m gui --open`) serves a page at http://127.0.0.1:8765/ and opens it. `setup.bat -All -Background` starts
 it with the other services, `setup.bat -Gui` opens it (starting it if needed), `-StopAll` stops it, and the desk opens it in your
-browser at login unless you pass `-NoGui`. It reads the same files the daemon writes and changes only what you press.
+browser at login unless you pass `-NoGui`. It reads the same files the daemon writes and changes only what you press. A banner under the
+header shows the same two warnings as the terminal dashboard (config edited since the daemon started; a model that is not answering).
 
 | Tab | What it is for |
 |---|---|
@@ -776,7 +805,10 @@ into system RAM slows each call dramatically.
 | `.browser_profile/` | The bot's browser profile **with logged-in sessions** | **Yes, never share or commit** |
 | `.api_token` | REST API bearer token | Yes |
 | `.daemon.pid`, `.api.pid`, `.langflow.pid`, `.gui.pid` | Process ids for the launcher | No |
-| `profile.json`, `facts.yaml` | Your personal data | Yes |
+| `status.json` | What the running daemon tells the dashboards: process id, config fingerprints, stopped models (removed when it exits cleanly) | No |
+| `profile.json`, `facts.yaml`, `config.local.yaml` | Your personal data and settings | Yes |
+| `me/` | Your resume versions and notes (`resumes/`, `experience/`) and what is computed from them (`derived/`) | **Yes** |
+| `.venv-tui/` | The terminal dashboard's own small environment, created by `tui.bat` | No |
 
 If you put the project under version control, ignore all of the above.
 
@@ -791,7 +823,8 @@ python -m pytest tests -q
 python run_tests.py
 ```
 
-The suite (294 tests with pytest; `run_tests.py` runs 293, skipping the one that needs the dashboard environment) includes real-browser tests against a fake application server. It takes a few minutes.
+The suite has 455 tests under pytest and takes about five minutes. It includes real-browser tests against a fake application server. `run_tests.py` is a
+dependency-free runner of the main suites (it does not need pytest).
 Tests that need a Playwright browser are skipped if none is installed. The suite is built around local fake
 servers and stubbed models, so it does not need Ollama or an internet connection.
 
@@ -811,6 +844,10 @@ servers and stubbed models, so it does not need Ollama or an internet connection
 | A site is always `unsupported` / parked | Open `applications/<job>/trace/` and read the last step and screenshot. Usually a CAPTCHA, a login wall, a button the agent will not press, or a site that redirects elsewhere (add trusted hosts to `agent.allowed_domains`) |
 | An application shows `unconfirmed` | Submit was clicked but no confirmation appeared. Check the site by hand; the bot will not retry it |
 | Firefox profile locked | Close any Firefox using `.browser_profile`; the launcher normally clears stale locks |
+| A dashboard says "config edited since the daemon started" | You changed `config.yaml` or `config.local.yaml` after the daemon loaded it, so it still runs the old settings. Restart: `setup.bat -StopAll`, then `setup.bat -All -Background` |
+| A dashboard says a model "is not answering" | That model failed twice in a row (Ollama restarting, out of memory, swapped out). It is asked again after the cool-down shown, and its jobs use the main model meanwhile. If it keeps happening, check `ollama ps` and the memory the model needs |
+| `setup.bat -All` opened three ordinary windows instead of one | Windows Terminal (`wt.exe`) is not installed; the desk falls back to plain windows. Use `setup.bat -All -Background` if you want nothing opened |
+| The wrong resume version was attached, or always the default | The title decides: "Full Stack", a tie, or a kind with no `resume-<kind>.pdf` keeps the default on purpose. The daemon log line `[Stage 3] Resume for this job:` appears only when a non-default version was used. `stage3.resume_per_job: false` turns it off |
 
 Logs: `daemon.log` (or `setup.bat -Logs`). Database events: `select * from events order by id desc limit 20;`
 in `state.db`.
