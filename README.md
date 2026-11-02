@@ -216,7 +216,7 @@ python sites.py list
 python sites.py approve greenhouse
 ```
 
-Then run it for real, either `python daemon.py` or `setup.bat -All -Background`.
+Then run it for real: `setup.bat -All` starts everything and opens the dashboard, the web interface and Langflow; `setup.bat -All -Background` starts the same services silently; `python daemon.py` runs only the daemon.
 
 (In PowerShell write `./setup.bat`, `./gui.bat` and `./tui.bat`: PowerShell does not run a program from the current folder by its bare name.)
 
