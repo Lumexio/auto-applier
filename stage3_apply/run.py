@@ -442,9 +442,11 @@ def _handle_recruiter_outreach(
     if not outreach_cfg.get("enabled", False) or not state:
         return
 
+    # With approval (the default) a drafted note is only queued for you; the daily cap then applies when the approved ones are sent (outreach_queue.py).
+    approval = outreach_cfg.get("approval", True)
     max_per_day = outreach_cfg.get("max_per_day", 5)
     daily_count = state.get_outreach_count_today()
-    if daily_count >= max_per_day:
+    if not approval and daily_count >= max_per_day:
         print(f"[Outreach] Daily recruiter outreach limit reached ({daily_count}/{max_per_day}). Pausing.")
         return
 
@@ -473,6 +475,11 @@ def _handle_recruiter_outreach(
                 template=outreach_cfg.get("template"),
                 llm_config=cfg.get("llm"),
             )
+            if approval:
+                import outreach_queue
+
+                print(outreach_queue.hold_for_approval(state, cfg, job_id, job, recruiter, msg))
+                return
             outreach_shot = app_dir / "recruiter_outreach.png"
             channel, out_status = send_recruiter_outreach(
                 session,

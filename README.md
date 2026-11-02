@@ -9,7 +9,7 @@ by [Ollama](https://ollama.com), and everything that matters for safety is decid
 
 > **Status:** MVP. The whole loop works end to end: find, filter, check fit, answer, fill in, submit, verify, and
 > hand you whatever needs a person. The pipeline, the answer engine, the agent and the safety rails are covered by
-> 490 automated tests, but a brand-new install has no application history, so **every kind of site starts on
+> 505 automated tests, but a brand-new install has no application history, so **every kind of site starts on
 > probation** (filled in and reviewed, not submitted) until you approve it. See [What the MVP includes](#what-the-mvp-includes)
 > for exactly what is in and what is not, and the [Safety model](#safety-model).
 > Setup instructions are in **[SETUP.md](SETUP.md)**.
@@ -76,6 +76,7 @@ The loop below is built, tested and run by the daemon today. Each row points at 
 | **Application engines** | Dedicated handlers for Greenhouse, Lever, Workday, LinkedIn Easy Apply and Handshake Quick Apply. For every other site an observe, decide, act, verify agent, which also takes over when a handler finds nothing it knows. A trace with a screenshot per step, and a failure picture when something goes wrong. | [Handling any site](#handling-any-site-the-application-agent) |
 | **Several local models** | Each job (fit, form questions, essays, verification, buttons) can go to the installed model that suits it. A missing or failing model falls back to the main one, and a model that keeps failing is left alone for a while. | [Several local models](#several-local-models-optional) |
 | **Safety rails** | Probation per kind of site, dry run that always wins, a daily cap and per-site limits, duplicate protection, submission only on page evidence, a second look at applications that were never confirmed, crash recovery and an audit trail. | [Safety and reliability](#safety-and-reliability) |
+| **Recruiter messages** | Optional and **off** by default (`outreach.enabled`). After an application goes through on LinkedIn, a short note to the posting's recruiter is drafted and put on a list. Nothing is sent until you approve it, with the wording editable; the daemon then sends only the approved ones, within a daily cap. | [Recruiter messages](#recruiter-messages-optional-asks-you-first) |
 | **Dashboards** | A terminal dashboard, a web page for everything that needs you (answer, decide, trust a site, finish by hand), a one-screen pending list, and a desk that tiles them with the daemon log. Both dashboards warn when a model has been stopped or when you edited the config after the daemon loaded it. | [Interfaces](#interfaces) |
 | **Control** | Commands for the daemon, answers, site trust, fit vetoes and your source of truth; a local REST API; an optional Langflow pipeline. | [Everyday commands](#everyday-commands) |
 | **Running it** | `setup.bat -All` starts everything and opens it; `-All -Background` starts it silently; `-EnableDesk` does it at every Windows login. Your settings live in `config.local.yaml`, so updating the project never touches them. | [Quick start](#quick-start) |
@@ -94,14 +95,13 @@ The loop below is built, tested and run by the daemon today. Each row points at 
 | **Unattended** | Single-instance lock, graceful shutdown, interrupted work parked for review, an Ollama wait at login, circuit breaker for failing models, and a status file the dashboards read to tell you when it needs a restart. |
 | **Modest hardware** | Works with one 7B model on 8 GB of VRAM (about 3 seconds per short call) or on a CPU, inside Ollama's default 2048-token window. |
 | **Yours to configure** | Defaults in `config.yaml`, your own changes in `config.local.yaml`; per-site, per-model, per-filter switches; MIT licensed. |
-| **Tested** | 490 tests, including real browsers driven against a fake application server. They need neither Ollama nor an internet connection. |
+| **Tested** | 505 tests, including real browsers driven against a fake application server. They need neither Ollama nor an internet connection. |
 | **Platform** | Windows 11 and Python 3.14. The Python core is portable; the launcher, desk and login entry are Windows-only. |
 
 ### Not in the MVP yet
 
 | Left out | Why, and what to do meanwhile |
 |---|---|
-| Recruiter outreach | Built but **off** (`outreach.enabled: false`). A draft-and-approve queue, so that nothing is ever sent without your OK, comes first. |
 | CAPTCHAs, new accounts, email codes | Never, by design: those jobs are skipped or parked for you. |
 | Writing your resume or cover letters | The cover letter is a template in `profile.json`. |
 | A launcher outside Windows | Run `python daemon.py` and the commands in [Everyday commands](#everyday-commands) directly. |
@@ -202,6 +202,16 @@ The loop below is built, tested and run by the daemon today. Each row points at 
   are parked for review rather than guessed at.
 - **Audit trail**: SQLite database of runs, attempts and events, plus a per-job folder of screenshots and answers.
 
+### Recruiter messages (optional, asks you first)
+- Off by default. With `outreach.enabled: true`, each submitted LinkedIn application leads to a short note, drafted from your profile, to the
+  recruiter shown on the posting. The note is **not sent**: it goes on a list (`python outreach_queue.py list`, or "Needs you" in the web
+  interface, where the text can be edited).
+- `approve <id>` (or *Send this*) approves exactly that wording; the daemon sends it after its next cycle in the bot's own browser, up to
+  `outreach.max_per_day`. `reject <id>` (or *Don't send*) turns it down, which also takes back an approval that has not been sent yet.
+- A recruiter is asked about once, nobody you already wrote to is drafted, a draft longer than LinkedIn's 300 characters or without a
+  LinkedIn profile link is never sent, and a sign-in page or LinkedIn's invitation limit stops the sending until the next cycle.
+  `outreach.approval: false` restores sending without asking; it is not recommended.
+
 ### Interfaces
 - **Terminal dashboard** (`tui.bat`): at-a-glance numbers (submitted today and against the daily cap, outcomes, the
   latest cycle's funnel, which models are loaded), the job being worked on right now with its step-by-step agent flow,
@@ -210,8 +220,8 @@ The loop below is built, tested and run by the daemon today. Each row points at 
 - **Web interface** (`gui.bat`, http://127.0.0.1:8765/): everything that needs a person on one page. Answer the questions the
   forms asked (a draft from your own resumes is already in the box, with the lines it rests on), settle fit decisions the models
   disagreed about, look at the filled-in forms of a site on probation and trust it, and finish by hand the jobs that send you to
-  the company's own site. Every button does what the matching command does; nothing is submitted from the page. Listens on this
-  computer only.
+  the company's own site, and approve or turn down the drafted messages to recruiters. Every button does what the matching command does; nothing is submitted or sent
+  from the page itself. Listens on this computer only.
 - **Pending list** (`python pending.py`): one screen of everything only you can do, each item with the command or link for it.
 - **The desk** (`setup.bat -Desk`, or `setup.bat -All`): the dashboard, the pending list and the daemon log tiled in one Windows
   Terminal window, with the web interface and Langflow opening in your browser. `-EnableDesk` does it at every Windows login.
@@ -295,6 +305,7 @@ Then run it for real: `setup.bat -All` starts everything and opens the dashboard
 | `python answers.py set "<question>" "<answer>" --requeue` | Answer once for all future applications |
 | `python answers.py approve "<question>" [--text "..."] [--all-verified] --requeue` | Accept the draft the bot wrote from your resumes (or your own wording) |
 | `python answers.py facts-init` | Write a starter `facts.yaml` from your profile (never overwrites) |
+| `python outreach_queue.py list` / `approve <id> [--text "..."]` / `reject <id>` / `status` | Messages to recruiters waiting for your OK; approve (optionally in your own words) or turn down |
 | `python reverify.py status` / `run` | Which `unconfirmed` applications are looked at again and what the last look found; `run` looks now (daemon stopped) |
 | `python sites.py list` / `approve <site>` / `revoke <site>` | Manage which sites may be submitted to |
 | `python fit_review.py list` / `show` / `approve <job>` / `reject <job>` | See postings the models vetoed or disagreed about, and overrule them |
@@ -334,7 +345,8 @@ Then run it for real: `setup.bat -All` starts everything and opens the dashboard
 | `resume_facts.py`, `source.py` | Reads the resumes in `me/` and computes years per technology, degrees, GPA and employer counts with provenance; the command to sync / show / check them |
 | `pending.py`, `desk.ps1` | The "what is waiting for you" screen, and the Windows Terminal layout that shows it with the dashboard and the daemon log |
 | `langflow_components.py`, `run_langflow.py`, `auto_applier_flow.json` | Optional visual pipeline |
-| `outreach.py` | Recruiter outreach (disabled by default) |
+| `outreach.py`, `outreach_queue.py` | Finding the recruiter and sending a note (disabled by default); the queue that holds every note until you approve it |
+| `bot_browser.py` | Opens the bot's own browser for the work that follows a cycle (second looks, approved messages) |
 | `import_profile.py`, `backfill_history.py` | Cookie import from your Firefox profile; a one-off repair of application history, kept for reference |
 | `stage1_generate/` | Experimental sandboxed scraper-code generator (not part of the daemon loop) |
 | `applier.py`, `store.py` | The original standalone prototype, kept for reference |

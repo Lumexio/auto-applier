@@ -81,7 +81,8 @@ def test_inbox_lists_everything_that_needs_a_person_and_counts_it():
         assert len(disputed) == 1 and disputed[0]["review"]["verdict"] == "apply" and disputed[0]["deal_breakers"]
         c = ib["counts"]
         assert c["questions"] == len(ib["questions"]) and c["fit"] == 1 and c["apply_by_hand"] == 2 and c["verify"] == 1
-        assert c["needs_you"] == c["questions"] + c["fit"] + c["apply_by_hand"] + c["verify"] + c["other"] + len(ib["probation"])
+        assert c["outreach"] == 2 == len(ib["outreach"]) and c["outreach_approved"] == 0, "the demo project has two drafted messages waiting"
+        assert c["needs_you"] == c["questions"] + c["fit"] + c["apply_by_hand"] + c["verify"] + c["other"] + c["outreach"] + len(ib["probation"])
 
 
 def test_what_is_parked_for_other_reasons_is_not_listed_twice():

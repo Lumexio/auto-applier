@@ -168,6 +168,26 @@ CREATE TABLE IF NOT EXISTS recruiter_outreach (
 CREATE INDEX IF NOT EXISTS idx_outreach_recruiter ON recruiter_outreach(recruiter_url);
 CREATE INDEX IF NOT EXISTS idx_outreach_sent      ON recruiter_outreach(sent_at DESC);
 
+-- Messages to recruiters that wait for the user's OK (outreach_queue.py). Nothing is sent from 'awaiting'; the daemon sends only what
+-- the user moved to 'approved', in exactly the wording stored in message_text. What was actually sent is also logged in recruiter_outreach.
+CREATE TABLE IF NOT EXISTS outreach_queue (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id          TEXT NOT NULL,
+    company         TEXT,
+    job_title       TEXT,
+    recruiter_name  TEXT NOT NULL,
+    recruiter_url   TEXT NOT NULL,
+    drafted_text    TEXT NOT NULL,
+    message_text    TEXT NOT NULL,
+    state           TEXT NOT NULL DEFAULT 'awaiting' CHECK (state IN ('awaiting','approved','rejected','sent','not_sent')),
+    outcome         TEXT,
+    created_at      TEXT NOT NULL,
+    decided_at      TEXT,
+    finished_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_outreach_queue_state ON outreach_queue(state, created_at);
+CREATE INDEX IF NOT EXISTS idx_outreach_queue_url   ON outreach_queue(recruiter_url);
+
 -- Answers the user gave explicitly (python answers.py set ...). They override every rule and the model.
 CREATE TABLE IF NOT EXISTS answer_bank (
     question_key  TEXT PRIMARY KEY,

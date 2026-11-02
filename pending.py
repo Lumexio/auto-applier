@@ -93,7 +93,8 @@ def plural(n: int, one: str, many: str | None = None) -> str:
     return f"{n} {one if n == 1 else (many or one + 's')}"
 
 
-def render(snap: data.Snapshot, parked: list[data.ParkedRow], color: bool = False, width: int = 100, now: datetime | None = None) -> str:
+def render(snap: data.Snapshot, parked: list[data.ParkedRow], color: bool = False, width: int = 100, now: datetime | None = None,
+           outreach: list[data.OutreachRow] | None = None) -> str:
     s = Style(color)
     now = now or datetime.now().astimezone()
     width = max(50, width)
@@ -138,10 +139,11 @@ def render(snap: data.Snapshot, parked: list[data.ParkedRow], color: bool = Fals
     verify = [p for p in parked if p.kind == "verify"]
     other = [p for p in parked if p.kind == "other"]
     probation = [x for x in snap.sites if not x["trusted"]]
+    messages = outreach or []
 
     line()
     line(s.bold("NEEDS YOU"))
-    if not (questions or disputed or apply_by_hand or verify or other or probation):
+    if not (questions or disputed or apply_by_hand or verify or other or probation or messages):
         line(s.good("Nothing is waiting for you."), 1)
 
     if questions:
@@ -150,6 +152,12 @@ def render(snap: data.Snapshot, parked: list[data.ParkedRow], color: bool = Fals
         for q in questions[:SHOWN]:
             line(f"• {clip(q['question_text'], width - 16)}  " + s.dim(f"×{plural(q['jobs'], 'job')}"), 3)
         more(len(questions))
+    if messages:
+        line(s.need(plural(len(messages), "message")) + " to recruiters waiting for your OK (nothing is sent without it)", 1)
+        line(s.dim("python outreach_queue.py list     then  approve <id> | reject <id>"), 3)
+        for m in messages[:SHOWN]:
+            line(f"• {clip(m.recruiter, 24)} @ {clip(m.company, 22)}  " + s.dim(clip(m.text, 40)), 3)
+        more(len(messages))
     if disputed:
         line(s.need(plural(len(disputed), "job")) + " where the fit models disagree: your call", 1)
         line(s.dim("python fit_review.py list     then  approve | reject <job>"), 3)
@@ -215,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
     def once() -> str:
         width = shutil.get_terminal_size((100, 30)).columns - 1
         snap = data.snapshot(args.root)
-        return render(snap, data.parked_for_you(args.root), color=color, width=width)
+        return render(snap, data.parked_for_you(args.root), color=color, width=width, outreach=data.outreach_waiting(args.root))
 
     if not args.watch:
         print(once())

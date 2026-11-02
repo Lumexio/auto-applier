@@ -197,7 +197,12 @@ reverify:
   delay_seconds: [4, 10]
   headless: true
 
+# Messages to the recruiter of a posting you applied to (LinkedIn). OFF by default. When on, a short note is DRAFTED after each submitted
+# application and put on a list; nothing is sent until you approve it (python outreach_queue.py list, or "Needs you" in the web interface).
+# The daemon then sends only the approved ones, in your wording, after its cycle and within max_per_day.
 outreach:
-  enabled: false        # OFF: no approval step exists yet, so nothing it would send is shown to you first. Leave it off
-  max_per_day: 5
+  enabled: false
+  approval: true         # false = send without asking (not recommended: it is your LinkedIn account writing to people)
+  max_per_day: 5         # messages sent per day (drafts waiting for you do not count)
+  max_waiting: 20        # no new draft is written while this many wait for you
   template: "Hi {recruiter_name}, I applied for the {job_title} role at {company}. With my background in {skill}, I'd love to connect. Best, {candidate_name}."

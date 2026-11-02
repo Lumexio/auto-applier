@@ -458,6 +458,59 @@ class StateStore:
         cur = self.conn.execute("SELECT COUNT(*) FROM recruiter_outreach WHERE status IN ('sent', 'drafted')")
         return int(cur.fetchone()[0])
 
+    # ---- Messages to recruiters that wait for your OK (outreach_queue.py) -------------
+
+    def queue_outreach(self, job_id: str, company: str, job_title: str, recruiter_name: str, recruiter_url: str, text: str) -> int | None:
+        """Put a drafted message in the queue. None when this recruiter already has one (waiting, approved, turned down or sent) or was contacted before:
+        you are asked about a recruiter once."""
+        if not recruiter_url or self.has_recruiter_been_contacted(recruiter_url):
+            return None
+        if self.conn.execute("SELECT 1 FROM outreach_queue WHERE recruiter_url = ?", (recruiter_url,)).fetchone():
+            return None
+        cur = self.conn.execute(
+            """
+            INSERT INTO outreach_queue(job_id, company, job_title, recruiter_name, recruiter_url, drafted_text, message_text, state, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'awaiting', ?)
+            """,
+            (job_id, company, job_title, recruiter_name, recruiter_url, text, text, utc_now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def outreach_queue_rows(self, *states: str) -> list[dict[str, Any]]:
+        marks = ",".join("?" for _ in states)
+        cur = self.conn.execute(f"SELECT * FROM outreach_queue WHERE state IN ({marks}) ORDER BY created_at, id", states)
+        return [dict(row) for row in cur.fetchall()]
+
+    def outreach_queue_row(self, queue_id: int) -> dict[str, Any] | None:
+        row = self.conn.execute("SELECT * FROM outreach_queue WHERE id = ?", (queue_id,)).fetchone()
+        return dict(row) if row else None
+
+    def approve_outreach(self, queue_id: int, text: str | None = None) -> bool:
+        """Send this message (``text`` is your own wording instead of the draft). Only a message that is waiting can be approved."""
+        cur = self.conn.execute(
+            "UPDATE outreach_queue SET state = 'approved', message_text = COALESCE(?, message_text), decided_at = ? WHERE id = ? AND state = 'awaiting'",
+            (text, utc_now(), queue_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def reject_outreach(self, queue_id: int) -> bool:
+        """Never send this one (also takes back an approval the daemon has not acted on yet)."""
+        cur = self.conn.execute(
+            "UPDATE outreach_queue SET state = 'rejected', decided_at = ? WHERE id = ? AND state IN ('awaiting','approved')", (utc_now(), queue_id)
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def finish_outreach(self, queue_id: int, state: str, outcome: str) -> bool:
+        """The daemon's last word on an approved message: ``sent``, or ``not_sent`` with the reason. Only an approved message can finish."""
+        cur = self.conn.execute(
+            "UPDATE outreach_queue SET state = ?, outcome = ?, finished_at = ? WHERE id = ? AND state = 'approved'", (state, outcome, utc_now(), queue_id)
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
     # ---- Answer bank & questions waiting for the user -------------------------
 
     def get_answer(self, question_key: str) -> str | None:

@@ -30,6 +30,8 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
 
+import bot_browser
+
 DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "sites": ["linkedin", "handshake"],  # kinds of site (as in `sites.py`) whose postings remember that you applied; elsewhere a look proves nothing
@@ -78,6 +80,10 @@ def applied_phrase(text: str) -> str | None:
     return None
 
 
+def is_sign_in_url(url: str) -> bool:
+    return bool(_SIGN_IN_PATH.search(urlparse(url or "").path))
+
+
 def site_of(url: str) -> str:
     from stage3_apply.ats_handlers import pick_handler
     return pick_handler(url).name
@@ -95,7 +101,7 @@ def look(session: Any, job: dict[str, Any]) -> Look:
     try:
         session.goto(url)
         here = session.current_url()
-        if _SIGN_IN_PATH.search(urlparse(here).path):
+        if is_sign_in_url(here):
             return Look("signed_out", "the posting sent the browser to a sign-in page")
         if hasattr(session, "has_captcha") and session.has_captcha():
             return Look("blocked", "a CAPTCHA is showing (not solved here)")
@@ -196,26 +202,11 @@ def _look_at(session: Any, state: Any, opts: dict[str, Any], jobs: list[dict[str
 
 
 def _in_browser(state: Any, cfg: dict[str, Any], opts: dict[str, Any], jobs: list[dict[str, Any]], should_stop, on_tick, pause) -> Summary:
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        print("[Reverify] Playwright is not installed; not looking at unconfirmed applications.")
-        return Summary()
-    from stage3_apply.run import PlaywrightSession, _launch_context
-
-    browser_cfg = cfg.get("browser", {})
-    base = Path(browser_cfg.get("user_data_dir", "./.browser_profile")).resolve()
     print(f"[Reverify] Looking at {len(jobs)} unconfirmed application(s) again.")
-    with sync_playwright() as p:
-        context = _launch_context(p, browser_cfg.get("type", "firefox").lower(), base, bool(opts["headless"]))
-        try:
-            page = context.pages[0] if context.pages else context.new_page()
-            summary = _look_at(PlaywrightSession(page, context), state, opts, jobs, should_stop, on_tick, pause)
-        finally:
-            try:
-                context.close()
-            except Exception:
-                pass
+    summary = bot_browser.run_with_session(
+        cfg, bool(opts["headless"]), lambda session: _look_at(session, state, opts, jobs, should_stop, on_tick, pause), "Reverify")
+    if summary is None:
+        return Summary()
     print(f"[Reverify] Looked at {summary.looked}; {summary.confirmed} now confirmed.")
     return summary
 

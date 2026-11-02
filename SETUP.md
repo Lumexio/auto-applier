@@ -385,8 +385,26 @@ the agent presses the button once and hands the file to the picker that opens, b
 label beside it), only when the form has no file field of that kind, and only when that file is configured and exists. A button for anything else (a photo, a transcript) is never pressed,
 and a generic required slot gets `attachments.default_path` if you set one. The trace (`steps.jsonl`, the `so_far` of the next step) says which button was pressed and whether the page then showed the file's name.
 
-Leave `outreach.enabled: false`. Recruiter outreach is the least finished part: it has no approval step yet, so nothing it would send
-is shown to you first. It stays off until a draft-and-approve queue exists.
+**Messages to recruiters** are off (`outreach.enabled: false`). When you switch them on, each application that goes through on LinkedIn leads to
+a short note to the recruiter shown on the posting, drafted from your profile (by the local model, or from `outreach.template` when the model
+gives nothing usable). **The note is not sent.** It goes on a list, and nothing leaves your computer until you approve it:
+
+```powershell
+python outreach_queue.py list                          # what is waiting, with ids
+python outreach_queue.py show 3                        # one in full
+python outreach_queue.py approve 3                     # send it as drafted ...
+python outreach_queue.py approve 3 --text "Hi Dana, ..."   # ... or in your own words (at most 300 characters)
+python outreach_queue.py approve --all                 # every waiting one, as drafted
+python outreach_queue.py reject 3                      # never; also takes back an approval that has not been sent
+python outreach_queue.py status                        # on or off, counts, today's cap
+```
+
+The web interface shows the same list under *Needs you* with the text editable (*Send this* / *Don't send*), and the pending list counts it.
+The daemon sends approved messages after its cycle, in the bot's own browser (so it is your LinkedIn account that writes), at most
+`outreach.max_per_day` a day, and exactly the wording you approved. It does not send a message that is longer than 300 characters, to a link that is not a LinkedIn profile, or to
+someone you already contacted; a sign-in page or LinkedIn's invitation limit stops the sending until the next cycle and the message stays approved.
+A recruiter is asked about once (a note you turned down is not drafted again), and no more drafts are written while `outreach.max_waiting` wait for you.
+`outreach.approval: false` sends without asking; leave it as it is.
 
 ## 5. Log in to the sites you use
 
@@ -701,7 +719,7 @@ header shows the same two warnings as the terminal dashboard (config edited sinc
 
 | Tab | What it is for |
 |---|---|
-| **Needs you** | **Questions the forms asked**: type an answer (or pick one of the form's options) and save: it is kept for every future form that asks the same, and the jobs that were waiting on it are tried again. A draft from your resumes and notes is already in the box with the lines it rests on and whether a second model confirmed it; an answer that names the company is saved for that company only. "Skip these jobs" ends them for good instead. **Fit models disagree**: *Apply anyway* queues the posting and no model can veto it; *Skip for good* ends it. **Sites on probation**: the filled-in forms (click a picture to see it whole, with the answers given and the questions left blank); *Trust* applies to the jobs held back and every later one at that kind of site. **Apply yourself** / **Check by hand** / **Other parked jobs**: open the posting, then say *I applied*, *try again* or *skip* |
+| **Needs you** | **Messages to recruiters** (when outreach is on): the drafted note, editable; *Send this* approves it for the daemon, *Don't send* turns it down. **Questions the forms asked**: type an answer (or pick one of the form's options) and save: it is kept for every future form that asks the same, and the jobs that were waiting on it are tried again. A draft from your resumes and notes is already in the box with the lines it rests on and whether a second model confirmed it; an answer that names the company is saved for that company only. "Skip these jobs" ends them for good instead. **Fit models disagree**: *Apply anyway* queues the posting and no model can veto it; *Skip for good* ends it. **Sites on probation**: the filled-in forms (click a picture to see it whole, with the answers given and the questions left blank); *Trust* applies to the jobs held back and every later one at that kind of site. **Apply yourself** / **Check by hand** / **Other parked jobs**: open the posting, then say *I applied*, *try again* or *skip* |
 | **Not confirmed** | Applications that were sent without a confirmation page (the bot never retries these on its own, so nothing is applied twice). Check, then say it went through, try again, or skip |
 | **Failed** | The bot could not finish them; try again now or give up |
 | **Saved answers** | Everything the bot may say, editable; add one before a form asks, or forget a wrong one |
@@ -865,7 +883,7 @@ python -m pytest tests -q
 python run_tests.py
 ```
 
-The suite has 490 tests under pytest and takes about five minutes. It includes real-browser tests against a fake application server. `run_tests.py` is a
+The suite has 505 tests under pytest and takes about five minutes. It includes real-browser tests against a fake application server. `run_tests.py` is a
 dependency-free runner of the main suites (it does not need pytest).
 Tests that need a Playwright browser are skipped if none is installed. The suite is built around local fake
 servers and stubbed models, so it does not need Ollama or an internet connection.
