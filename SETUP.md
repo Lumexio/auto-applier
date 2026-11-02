@@ -526,6 +526,10 @@ Switch the second opinion off with `fit.second_opinion: false`.
 `setup.bat` is the Windows launcher (it runs `setup.ps1`). With no arguments it shows an interactive menu;
 the flags below skip the menu.
 
+> **PowerShell does not run a program from the current folder by its bare name.** In PowerShell write `./setup.bat -All -Background`
+> (and `./gui.bat`, `./tui.bat`); in Command Prompt, and in the Windows Run box, `setup.bat -All -Background` works as written.
+> Every `setup.bat` / `gui.bat` / `tui.bat` command in this guide and in the README is written for Command Prompt.
+
 | Command | What it does |
 |---|---|
 | `setup.bat -All -Background` | Start the daemon, the web interface (port 8765), the REST API (port 8000) and Langflow (port 7860) in the background |

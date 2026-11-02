@@ -44,6 +44,16 @@ _RESTRICTION = re.compile(
     r"(?:(?:who|that)\s+(?:are\s+)?)?(?:currently\s+)?(?:located|based|living|residing|resident)?\s*(?:in|within|of)\b",
     re.IGNORECASE,
 )
+# A work mode written at the end of the TITLE: "Backend Engineer (Hybrid)", "Platform Engineer - Remote", "[On-site]". Only in brackets or after a dash,
+# and not when a technology follows ("Hybrid Cloud Engineer", "Engineer (Hybrid Infrastructure)").
+_MODE = r"hybrid|h[ií]brido|on[- ]?site|in[- ]office|in[- ]person|presencial|remote|remoto|wfh|work from home"
+_MODE_WORD = re.compile(rf"\b(?:{_MODE})\b", re.IGNORECASE)
+_TITLE_MODE = re.compile(
+    rf"(?:[(\[]\s*|\s[-–—|:]\s+)(?:{_MODE})\b"
+    r"(?!\s+(?:cloud|infra\w*|environments?|architectures?|systems?|storage|deploy\w*|network\w*|data|workloads?|apps?|applications?|solutions?|platforms?"
+    r"|integration|connectivity|multi|sensing))[^)\]\n]{0,30}(?:[)\]]|$)",
+    re.IGNORECASE,
+)
 _RESIDENTS_ONLY = re.compile(r"\bresidents?\s+only\b", re.IGNORECASE)         # "US residents only": the place is what comes just before
 _NEGATION = re.compile(r"\b(?:not|no|never|without|neither|nor|\w*n't)\b[^.]{0,25}$", re.IGNORECASE)
 _SENTENCE_END = re.compile(r"[\n;]|(?<!\b[A-Z])\.\s+(?=[A-Z])")          # "the US. Next" ends a sentence; "U.S. Next" is read as an abbreviation
@@ -120,6 +130,13 @@ def _alternative(alt: str, job_remote: bool, cand: Candidate, cfg: dict[str, Any
     return f"{said} is not open to {cand.country}"
 
 
+def title_mode(title: Any) -> str:
+    """"remote" or "on_site" when the title ends in a work mode ("... (Hybrid)"), else "" (nothing said, or both)."""
+    modes = {"remote" if re.match(r"remot|wfh|work from", word, re.IGNORECASE) else "on_site"
+             for m in _TITLE_MODE.finditer(str(title or "")) for word in _MODE_WORD.findall(m.group(0))}      # "(Hybrid or Remote)" names both
+    return modes.pop() if len(modes) == 1 else ""
+
+
 def _by_location(job: dict[str, Any], cand: Candidate, cfg: dict[str, Any]) -> str | None:
     location = str(job.get("location") or "")
     folded = fold(location)
@@ -128,9 +145,14 @@ def _by_location(job: dict[str, Any], cand: Candidate, cfg: dict[str, Any]) -> s
     for word in cfg["always_keep"]:
         if fold(word) and re.search(rf"(?<![a-z0-9]){re.escape(fold(word))}(?![a-z0-9])", folded):
             return None
+    mode = title_mode(job.get("title"))
+    job_remote = bool(job.get("remote")) or mode == "remote"
     reasons: list[str] = []
     for alt in (a for a in re.split(r"[;|\n]+", location) if a.strip()):
-        why = _alternative(alt, bool(job.get("remote")), cand, cfg)
+        said = alt
+        if mode == "on_site" and not _REMOTE.search(fold(alt)) and not _ON_SITE.search(fold(alt)):
+            said = f"{alt.strip()} (hybrid, from the title)"            # the location names no mode; the title does
+        why = _alternative(said, job_remote, cand, cfg)
         if why is None:
             return None                                        # one workable alternative is enough
         reasons.append(why)

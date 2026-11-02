@@ -215,6 +215,8 @@ python sites.py approve greenhouse
 
 Then run it for real, either `python daemon.py` or `setup.bat -All -Background`.
 
+(In PowerShell write `./setup.bat`, `./gui.bat` and `./tui.bat`: PowerShell does not run a program from the current folder by its bare name.)
+
 ## Everyday commands
 
 | Command | What it does |
