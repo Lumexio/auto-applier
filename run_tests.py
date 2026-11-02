@@ -313,6 +313,7 @@ def main():
         ("Pending List and Boot Desk", "test_pending"),
         ("Source of Truth (resumes to facts)", "test_p7_source"),
         ("CAPTCHA Detection", "test_p9_captcha"),
+        ("Answers From Your Own Sources (evidence ladder)", "test_p10_evidence"),
         ("Repository Hygiene (public repo)", "test_repo_hygiene"),
         ("Multi-user Readiness (config layers, profile, licence)", "test_p8_multiuser"),
     ):

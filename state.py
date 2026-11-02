@@ -98,6 +98,11 @@ class StateStore:
         # Any application row that already exists was attempted at least once.
         ("applications", "attempts", "INTEGER NOT NULL DEFAULT 0", "UPDATE applications SET attempts = 1"),
         ("run_diagnostics", "removed_relevance", "INTEGER NOT NULL DEFAULT 0", None),
+        ("pending_questions", "proposal", "TEXT", None),
+        ("pending_questions", "proposal_basis", "TEXT", None),
+        ("pending_questions", "proposal_verified", "INTEGER NOT NULL DEFAULT 0", None),
+        ("pending_questions", "proposal_note", "TEXT", None),
+        ("pending_questions", "proposal_scope", "TEXT NOT NULL DEFAULT ''", None),
     )
 
     def _migrate(self) -> None:
@@ -480,28 +485,40 @@ class StateStore:
             key = normalize_key(q.get("label", ""))
             if not key:
                 continue
+            draft = q.get("proposal") or {}
             self.conn.execute(
                 """
-                INSERT INTO pending_questions(job_id, question_key, question_text, kind, options, reason, first_seen_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(job_id, question_key) DO UPDATE SET reason = excluded.reason
+                INSERT INTO pending_questions(job_id, question_key, question_text, kind, options, reason, first_seen_at,
+                                              proposal, proposal_basis, proposal_verified, proposal_note, proposal_scope)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id, question_key) DO UPDATE SET
+                    reason = excluded.reason, proposal = excluded.proposal, proposal_basis = excluded.proposal_basis,
+                    proposal_verified = excluded.proposal_verified, proposal_note = excluded.proposal_note,
+                    proposal_scope = excluded.proposal_scope
                 """,
-                (job_id, key, q.get("label", ""), q.get("kind"), "|".join(q.get("options") or []), q.get("reason", ""), now),
+                (job_id, key, q.get("label", ""), q.get("kind"), "|".join(q.get("options") or []), q.get("reason", ""), now,
+                 draft.get("text"), draft.get("basis"), 1 if draft.get("verified") else 0, draft.get("note"), draft.get("scope") or ""),
             )
         self.conn.commit()
 
     def list_pending(self) -> list[dict[str, Any]]:
         rows = self.conn.execute(
             """
-            SELECT question_key, MIN(question_text) AS question_text, MIN(kind) AS kind, MIN(options) AS options,
-                   MIN(reason) AS reason, COUNT(DISTINCT job_id) AS jobs
-              FROM pending_questions GROUP BY question_key ORDER BY jobs DESC, question_key
+            SELECT question_key, proposal_scope AS scope, MIN(question_text) AS question_text, MIN(kind) AS kind, MIN(options) AS options,
+                   MIN(reason) AS reason, COUNT(DISTINCT job_id) AS jobs,
+                   MAX(proposal) AS proposal, MAX(proposal_basis) AS proposal_basis, MAX(proposal_verified) AS proposal_verified,
+                   MAX(proposal_note) AS proposal_note
+              FROM pending_questions GROUP BY question_key, proposal_scope ORDER BY jobs DESC, question_key
             """
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def resolve_pending(self, question_key: str) -> int:
-        cur = self.conn.execute("DELETE FROM pending_questions WHERE question_key = ?", (question_key,))
+    def resolve_pending(self, question_key: str, scope: str | None = None) -> int:
+        """Forget the waiting question. With ``scope`` only the rows whose drafted answer named that company; without, every row (an answer for all companies)."""
+        if scope is None:
+            cur = self.conn.execute("DELETE FROM pending_questions WHERE question_key = ?", (question_key,))
+        else:
+            cur = self.conn.execute("DELETE FROM pending_questions WHERE question_key = ? AND proposal_scope = ?", (question_key, scope))
         self.conn.commit()
         return cur.rowcount
 

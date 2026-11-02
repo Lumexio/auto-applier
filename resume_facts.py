@@ -350,6 +350,27 @@ def _implied(skill: str) -> list[str]:
     return seen
 
 
+def spoken_languages(files: list[Path]) -> tuple[dict[str, str], dict[str, str]]:
+    """The languages you say you speak, as ``english_level: Professional`` (first resume that states it wins), and where each was read.
+
+    Only the written form "English (Professional)" counts, and only for a human language: a line like "Go (Intermediate)" is a skill.
+    """
+    levels: dict[str, str] = {}
+    where: dict[str, str] = {}
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for found in _SPOKEN_ITEM.finditer(plain(text)):
+            m = re.match(r"([A-Za-z]+)\s*\(([^)]*)\)", found.group(0))
+            if m and m.group(1).casefold() in _HUMAN_LANGUAGES and f"{m.group(1).casefold()}_level" not in levels:
+                key = f"{m.group(1).casefold()}_level"
+                levels[key] = m.group(2).strip().capitalize()
+                where[f"languages.{key}"] = f"written as '{found.group(0)}' in {path.parent.name}/{path.name}"
+    return levels, where
+
+
 def derive(cfg: dict[str, Any], today: date | None = None) -> dict[str, Any]:
     """Everything the resumes in the source folder say, as a dict ready to be written to experience.yaml. {} when there are none."""
     today = today or date.today()
@@ -412,6 +433,8 @@ def derive(cfg: dict[str, Any], today: date | None = None) -> dict[str, Any]:
         f"dates of {len(counted)} {'job' if policy['count'] == 'jobs' else 'job/project'}(s): "
         + ", ".join(f"{e.company or e.title} {span(e.rng)}" for e in sorted(counted, key=lambda e: e.rng)))
 
+    languages, language_notes = spoken_languages(files)
+    provenance.update(language_notes)
     summary = next((r.summary for r in resumes if r.summary), "")
     highlights = list(dict.fromkeys(b for e in sorted(jobs, key=lambda e: -e.rng[1]) for b in e.bullets))[:8]
     narrative: dict[str, Any] = {}
@@ -430,6 +453,7 @@ def derive(cfg: dict[str, Any], today: date | None = None) -> dict[str, Any]:
         "conflicts": conflicts,
         "experience": {"total_years": career, "years_by_skill": dict(sorted(by_skill.items(), key=lambda kv: (-kv[1], kv[0])))},
         "narrative": narrative,
+        "languages": languages,
         "provenance": provenance,
         "jobs": [{"title": e.title, "company": e.company, "dates": span(e.rng), "years": years([e.rng])} for e in sorted(jobs, key=lambda e: e.rng)],
         "projects": [{"title": e.title, "dates": span(e.rng)} for e in sorted(projects, key=lambda e: e.rng)],

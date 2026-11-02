@@ -293,7 +293,8 @@ models:
 |---|---|---|
 | `fit` | judges a posting against you | needs reading and judgement |
 | `questions` | maps a form question to your facts | strict JSON; abstaining is the right answer when the facts do not say |
-| `essay` | drafts a free-text answer (`answers.open_ended: generate`) | only used when you turn that on |
+| `essay` | drafts a free-text answer from your resumes and notes (`answers.open_ended: propose` or `generate`) | quotes the lines it used; a draft is checked in code before anyone sees it |
+| `verify` | confirms a drafted answer against the lines it quoted | give it a DIFFERENT model than `essay`/`questions` (for example `verify: heavy`); with `answers.require_independent_verifier: true` a draft is only trusted when it did |
 | `agent` | chooses between buttons on an unfamiliar page | a list of roles: vote *k* is cast by role *k* in menu order *k*, and the votes must still all agree |
 
 A task you do not list uses the `llm` block, so you can adopt this one job at a time.
@@ -347,8 +348,11 @@ fit:
 answers:
   enabled: true
   accept_consents: true         # tick privacy/terms/accuracy boxes (never marketing opt-ins)
-  open_ended: "review"          # "review": park essay questions | "generate": draft from facts.yaml narrative
+  open_ended: "propose"         # essays: "review" parks them untouched | "propose" drafts one from your resumes/notes and parks it for your OK | "generate" fills in a verified draft
   answer_optional: false
+  evidence: true                # a question the fact sheet cannot answer is tried against your resumes and notes (quoted, checked, verified)
+  evidence_passages: 6          # how many lines of your sources one question may be shown
+  require_independent_verifier: false   # true: a draft is only trusted when a different model than its author confirmed it (models.tasks.verify)
 
 agent:
   enabled: true                 # false: sites without a dedicated handler are skipped
@@ -433,6 +437,18 @@ python answers.py set "Are you willing to relocate?" "No" --requeue
 `--requeue` puts the jobs that were only waiting on that answer back in the queue (only while the posting is still
 listed). Other commands: `answers.py list`, `answers.py forget "<question>"`, `answers.py requeue [JOB_ID]`.
 You can also add the fact to `facts.yaml` and requeue.
+
+Questions your fact sheet cannot answer are tried against your resumes and notes first (see "Answering application
+questions" in the README). When that produces a draft, `pending` shows it under the question, with the files and the exact
+lines it rests on, and whether a model confirmed it:
+
+```powershell
+python answers.py approve "Why do you want to join Acme?" --requeue     # accept the draft (saved for that company only if it names it)
+python answers.py approve "Tell us about yourself" --text "My own wording" --requeue
+python answers.py approve --all-verified --requeue                       # every draft a model confirmed
+```
+
+Nothing a model wrote is filled in unless it passed the checks, and an essay only when `answers.open_ended` is `generate`.
 
 ### 7.2 Approve sites (probation)
 

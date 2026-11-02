@@ -98,6 +98,7 @@ class ApplyAgent:
         self._tried: Counter[tuple[str, str, str]] = Counter()
         self._fills: Counter[str] = Counter()
         self._visits: Counter[str] = Counter()
+        self._answering = 0.0                              # seconds spent drafting answers: a long form must not use up the page-walking budget
         self._after_apply = False
         self._after_click: tuple[frozenset[str], set[str]] | None = None   # (question labels, errors) just before the last step click
         self.allowed: set[str] = {name for _, name in ATS_HOSTS} | {str(d).lower() for d in self.cfg["allowed_domains"]}
@@ -120,7 +121,7 @@ class ApplyAgent:
             self.step += 1
             if self.step > int(self.cfg["max_steps"]):
                 raise AgentStop("budget", f"no way to finish within {self.cfg['max_steps']} steps")
-            if self.clock() - started > float(self.cfg["max_seconds"]):
+            if self.clock() - started - self._answering > float(self.cfg["max_seconds"]):
                 raise AgentStop("budget", f"no way to finish within {self.cfg['max_seconds']} seconds")
 
             snap = take_snapshot(self.session)
@@ -266,7 +267,11 @@ class ApplyAgent:
 
     def _fill(self, snap: PageSnapshot, sig: str) -> None:
         self._fills[sig] += 1
-        self.solve()                                       # raises NeedsHumanInput when a required question has no answer
+        began = self.clock()
+        try:
+            self.solve()                                   # raises NeedsHumanInput when a required question has no answer
+        finally:
+            self._answering += self.clock() - began        # every unknown question can mean a few model calls
         self._upload_files(snap)
         self.history.append("filled in the form")
 

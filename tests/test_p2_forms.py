@@ -177,5 +177,5 @@ def test_solver_answers_a_real_form_from_the_fact_sheet_and_parks_what_it_cannot
 
             # the one required question nobody can answer is reported, with the reason
             assert report.blocking and [u["label"] for u in report.unanswered] == ["Why do you want to work at Acme?"]
-            assert "open_ended" in report.unanswered[0]["reason"]
+            assert "to draw on" in report.unanswered[0]["reason"]
             assert len(report.answered) >= 7

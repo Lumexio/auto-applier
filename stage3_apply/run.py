@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from answerer import DEFAULT_ANSWERS_CFG, AnswerContext, QuestionSolver, release_answerable
+from evidence import PassageStore
 from facts import load_facts, overlay_derived
 from fit import DEFAULT_FIT_CFG, FitScorer, build_fit_gate
 from llm_client import build_llm_cfg
@@ -587,7 +588,7 @@ def stage3_run(
     agent_cfg = {**DEFAULT_AGENT_CFG, **{k: v for k, v in cfg.get("agent", {}).items() if k != "probation"}}
     facts = _load_facts_or_empty(cfg) if (answers_cfg["enabled"] or fit_cfg["enabled"]) else {}
     solver = (
-        QuestionSolver(profile, facts, llm_cfg, answers_cfg, bank_get=state.get_answer if state else None)
+        QuestionSolver(profile, facts, llm_cfg, answers_cfg, bank_get=state.get_answer if state else None, passages=PassageStore(cfg))
         if answers_cfg["enabled"] else None
     )
     if solver is not None and state is not None:

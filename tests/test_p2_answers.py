@@ -236,19 +236,61 @@ def test_questions_are_batched_to_fit_the_context_window():
     assert len(calls) > 1 and all(tokens <= 1500 for tokens in calls), calls
 
 
-def test_open_ended_questions_are_parked_by_default_and_drafted_only_from_the_narrative_when_enabled():
+def essay_model(answer, quotes, supported=True):
+    """A stand-in for the model: drafts ``answer`` quoting ``quotes``, and (as the checker) says whether the draft is supported."""
+
+    def call(cfg, system, user, **kw):
+        if "check a drafted" in system:
+            return {"supported": supported, "unsupported": [] if supported else ["a claim the evidence does not state"]}
+        return {"answer": answer, "quotes": quotes}
+
+    return call
+
+
+def test_open_ended_questions_wait_for_you_in_review_mode_and_are_drafted_from_your_own_words_otherwise():
     essay = q("Why do you want to work at Acme?", "textarea", qid=5)
     with patch("answerer.chat_json", side_effect=AssertionError("review mode must not call the model")):
-        plan = plan_answers([essay], ctx())
-    assert plan.unanswered == [essay] and "open_ended" in plan.reasons[5]
+        plan = plan_answers([essay], ctx(cfg={"open_ended": "review"}))
+    assert plan.unanswered == [essay] and "open_ended" in plan.reasons[5] and not plan.proposals
 
+    quote = ["Backend engineer focused on APIs and databases"]
+    good = essay_model("I build reliable backend systems and APIs.", quote)
+    with patch("answerer.chat_json", side_effect=good):
+        plan = plan_answers([essay], ctx(cfg={"open_ended": "generate"}))
+    assert plan.answers[0].source == "generated" and plan.answers[0].value == "I build reliable backend systems and APIs."
+
+    # the default offers the verified draft instead of filling it in
+    with patch("answerer.chat_json", side_effect=good):
+        plan = plan_answers([essay], ctx())
+    assert plan.answers == [] and plan.unanswered == [essay]
+    assert plan.proposals[5].verified and plan.proposals[5].text == "I build reliable backend systems and APIs." and "facts.yaml" in plan.proposals[5].basis
+
+    # every way a draft can be dishonest parks the question without any proposal
     gen = ctx(cfg={"open_ended": "generate"})
-    with patch("answerer.chat_json", return_value={"answer": "I build reliable backend systems and APIs."}) as model:
+    dishonest = {
+        "invented number": ("I have 25 years of experience.", quote),
+        "invented employer": ("I was a Backend engineer at Initech.", quote),
+        "invented tool": ("I build APIs with Kubernetes.", quote),
+        "invented link": ("I build APIs, see https://evil.example/cv", quote),
+        "quote not in the sources": ("I build APIs.", ["I led a team of twelve engineers"]),
+        "no quote at all": ("I build APIs.", []),
+        "quote too short to prove anything": ("I build APIs.", ["APIs"]),
+        "nothing to say": (None, []),
+        "far longer than asked": ("I build APIs. " * 80, quote),
+    }
+    for name, (answer, quotes) in dishonest.items():
+        with patch("answerer.chat_json", side_effect=essay_model(answer, quotes)):
+            plan = plan_answers([essay], gen)
+        assert plan.answers == [] and plan.unanswered == [essay] and not plan.proposals, name
+
+    # a draft the checking model does not support is offered to you, marked unverified, and never filled in
+    with patch("answerer.chat_json", side_effect=essay_model("I build APIs.", quote, supported=False)):
         plan = plan_answers([essay], gen)
-    assert plan.answers[0].source == "generated" and "distributed systems" in model.call_args.args[2]
-    with patch("answerer.chat_json", return_value={"answer": "I have 25 years of experience."}):
-        assert plan_answers([essay], gen).unanswered == [essay]                           # invented number
-    assert plan_answers([essay], ctx(facts={**FACTS, "narrative": {}}, cfg={"open_ended": "generate"})).unanswered == [essay]   # nothing to base it on
+    assert plan.answers == [] and not plan.proposals[5].verified and "did not find support" in plan.proposals[5].note
+
+    nothing = ctx(facts={**FACTS, "narrative": {}}, cfg={"open_ended": "generate"})
+    with patch("answerer.chat_json", side_effect=AssertionError("with no sources there is nothing to ask a model about")):
+        assert plan_answers([essay], nothing).unanswered == [essay]
 
 
 # --------------------------------------------------------------------------- the solver on a page

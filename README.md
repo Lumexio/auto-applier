@@ -96,7 +96,16 @@ This project takes the opposite approach:
 - If a *required* question cannot be answered, the job is **parked as `needs_review`** and listed by
   `python answers.py pending`. Answer it once (`answers.py set`) and it is used for all future applications.
 - Consent boxes (privacy policy, terms, "my information is accurate") can be ticked automatically; marketing
-  opt-ins never are. Essay/opinion questions are parked for you (or drafted from a `narrative` block if you opt in).
+  opt-ins never are.
+- **When the fact sheet does not say, your own words do.** A question no rule covers ("what do you use to store tracking data?",
+  "tell us about something you built") is tried against the lines of your resumes and notes (`me/`): a local model drafts an
+  answer **quoting** the lines it relied on, code checks that every quote is word for word in your files and that the answer
+  adds no link, number, tool or name they do not contain, and a second model call confirms every claim. A short answer that
+  passes is filled in (the audit trail names the file and the line). An essay is **proposed, not filled in**, unless you set
+  `answers.open_ended: generate`; `python answers.py pending` shows each draft with its sources, and
+  `python answers.py approve "<question>"` accepts it (an answer that names the company is saved for that company only).
+- Some questions are never answered for you, whatever your files say: whether you used AI for the application, citizenship and
+  identity numbers, signatures, dismissals and legal disclosures, security clearances, criminal history.
 
 ### Handling any site: the application agent
 - Dedicated handlers: **Greenhouse, Lever, Workday, LinkedIn Easy Apply, Handshake Quick Apply**.
