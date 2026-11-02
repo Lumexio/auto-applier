@@ -195,7 +195,7 @@ def render(snap: data.Snapshot, parked: list[data.ParkedRow], color: bool = Fals
         line(s.dim("nothing"), 1)
 
     line()
-    line(s.dim("live view: tui.bat    log: setup.bat -Logs    status: setup.bat -Status"))
+    line(s.dim("live view: tui.bat    answer and decide in your browser: gui.bat    log: setup.bat -Logs    status: setup.bat -Status"))
     return "\n".join(out)
 
 

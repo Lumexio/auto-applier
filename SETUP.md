@@ -427,6 +427,10 @@ python -c "import sqlite3; print(sqlite3.connect('state.db').execute('select sta
 
 ### 7.1 Answer anything it was missing
 
+The easiest way is the web interface (section 9, "The web interface"): `gui.bat` opens a page with every waiting question, a
+draft from your own resumes already in the box where there is one, and a button that saves your answer and queues the jobs
+again. The commands below do the same.
+
 `python answers.py pending` lists the *required* questions that stopped applications, most-needed first. Answer one
 and it is reused everywhere:
 
@@ -523,15 +527,16 @@ the flags below skip the menu.
 
 | Command | What it does |
 |---|---|
-| `setup.bat -All -Background` | Start the daemon, the REST API (port 8000) and Langflow (port 7860) in the background |
+| `setup.bat -All -Background` | Start the daemon, the web interface (port 8765), the REST API (port 8000) and Langflow (port 7860) in the background |
+| `setup.bat -Gui` | Open the web interface for what needs you in your browser (starts it if it is not running) |
 | `setup.bat -Daemon -Background` | Start only the daemon, detached |
 | `setup.bat -Status` | Show what is running |
 | `setup.bat -Logs` | Stream the live daemon log |
-| `setup.bat -StopAll` | Stop the daemon, API and Langflow |
+| `setup.bat -StopAll` | Stop the daemon, web interface, API and Langflow |
 | `setup.bat -StopDaemon` | Stop only the daemon |
 | `setup.bat -DryRun` | One dry-run cycle |
 | `setup.bat -EnableAutoStart` / `-DisableAutoStart` | Start everything at Windows login, hidden (adds or removes a script in your Startup folder) |
-| `setup.bat -Desk` | Open the desk now: dashboard, what is waiting for you, and the daemon log, tiled in one Windows Terminal window; the Langflow web UI opens in your default browser once it answers (`-NoGui` leaves the browser out) |
+| `setup.bat -Desk` | Open the desk now: dashboard, what is waiting for you, and the daemon log, tiled in one Windows Terminal window; the web interface and the Langflow web UI open in your default browser once they answer (`-NoGui` leaves the browser out) |
 | `setup.bat -EnableDesk` / `-DisableDesk` | Open the desk at every Windows login and start the services there (replaces `-EnableAutoStart`; add `-DaemonOnly` to leave out the API, Langflow and the browser, or `-NoGui` to leave out only the browser) |
 | `setup.bat -Login "<url>"` | Open the login browser for a site |
 | `setup.bat -SyncCookies` | Import cookies from your personal Firefox |
@@ -619,6 +624,29 @@ environment too), and `tui.bat --selftest` drives the dashboard headlessly and p
 If colours are missing, your shell has `NO_COLOR` set; unset it. If the dashboard says "daemon stopped" while you
 know it runs, it may be running as another user or in WSL (the process check only sees this Windows session).
 
+### The web interface: answer and decide in your browser
+
+`gui.bat` (or `python -m gui --open`) serves a page at http://127.0.0.1:8765/ and opens it. `setup.bat -All -Background` starts
+it with the other services, `setup.bat -Gui` opens it (starting it if needed), `-StopAll` stops it, and the desk opens it in your
+browser at login unless you pass `-NoGui`. It reads the same files the daemon writes and changes only what you press.
+
+| Tab | What it is for |
+|---|---|
+| **Needs you** | **Questions the forms asked**: type an answer (or pick one of the form's options) and save: it is kept for every future form that asks the same, and the jobs that were waiting on it are tried again. A draft from your resumes and notes is already in the box with the lines it rests on and whether a second model confirmed it; an answer that names the company is saved for that company only. "Skip these jobs" ends them for good instead. **Fit models disagree**: *Apply anyway* queues the posting and no model can veto it; *Skip for good* ends it. **Sites on probation**: the filled-in forms (click a picture to see it whole, with the answers given and the questions left blank); *Trust* applies to the jobs held back and every later one at that kind of site. **Apply yourself** / **Check by hand** / **Other parked jobs**: open the posting, then say *I applied*, *try again* or *skip* |
+| **Not confirmed** | Applications that were sent without a confirmation page (the bot never retries these on its own, so nothing is applied twice). Check, then say it went through, try again, or skip |
+| **Failed** | The bot could not finish them; try again now or give up |
+| **Saved answers** | Everything the bot may say, editable; add one before a form asks, or forget a wrong one |
+| **Sites** | Trust or put back on probation |
+| **Activity** | Latest outcomes, what is being applied to right now, the daemon log |
+
+*I applied* records the posting as submitted by you; *try again* forgets the attempt so the next cycle queues it (only if the
+posting is still listed), and the page asks first when that could apply twice; *skip* is final. None of the buttons submits an
+application or contacts anyone: they record your decision and the daemon acts on it in its next cycle.
+
+The page is meant for you alone. It listens on `127.0.0.1` (this computer) only; every request needs a random token that is
+built into the page when it is served, a request from another website or another host name is refused, and postings are shown
+as plain text, never as markup. If the port is taken, `python -m gui --port 9000`; `gui.bat --demo` shows it on made-up data.
+
 ### Your source of truth: resumes that answer for you
 
 The bot answers only from what you state, never from imagination. Your resumes are the best statement of your experience you
@@ -675,9 +703,10 @@ sent but never confirmed). It is read-only and uses the same data as the dashboa
 right (refreshed every minute) and the daemon on the bottom right. That last pane starts the services if they are not
 running and then follows `daemon.log`. Closing the window does not stop anything.
 
-The Langflow web UI (http://localhost:7860), the one graphical interface the project has, opens in your default browser as soon
-as it answers; it needs a minute or two to start, and the page opens by itself when it is ready. The REST API on port 8000 has
-no screen, so nothing opens for it. `-NoGui` leaves the browser out; `-DaemonOnly` leaves out Langflow and with it the browser.
+Two web pages open in your default browser as soon as they answer: the web interface for what needs you
+(http://127.0.0.1:8765/, up in seconds) and the Langflow web UI (http://localhost:7860, a minute or two to start; its page opens
+by itself when it is ready). The REST API on port 8000 has no screen, so nothing opens for it. `-NoGui` leaves the browser out;
+`-DaemonOnly` leaves out the web interface and Langflow, and with them the browser.
 
 `setup.bat -EnableDesk` does this at every Windows login, so the first thing you see after logging in is what is pending and
 the project running. Things to know:
@@ -729,7 +758,7 @@ into system RAM slows each call dramatically.
 | `daemon.log` | Log of every cycle | Yes |
 | `.browser_profile/` | The bot's browser profile **with logged-in sessions** | **Yes, never share or commit** |
 | `.api_token` | REST API bearer token | Yes |
-| `.daemon.pid`, `.api.pid`, `.langflow.pid` | Process ids for the launcher | No |
+| `.daemon.pid`, `.api.pid`, `.langflow.pid`, `.gui.pid` | Process ids for the launcher | No |
 | `profile.json`, `facts.yaml` | Your personal data | Yes |
 
 If you put the project under version control, ignore all of the above.

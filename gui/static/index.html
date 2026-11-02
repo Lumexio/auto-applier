@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auto-Applier Desk</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f6f8; --card: #ffffff; --ink: #1a1f26; --muted: #596473; --line: #d9dee5; --chip: #eceff3;
+    --accent: #1f55d1; --accent-ink: #ffffff; --good: #0f7a48; --warn: #8f5500; --bad: #b3261e; --soft-bad: #fdecea; --soft-good: #e6f5ec; --soft-warn: #fff3dc;
+    --shadow: 0 1px 2px rgba(20, 30, 45, .06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111417; --card: #1a1e23; --ink: #e7eaee; --muted: #9aa5b2; --line: #2b323a; --chip: #262c33;
+      --accent: #7ba3ff; --accent-ink: #0c1424; --good: #4cc38a; --warn: #e3a23d; --bad: #ff7b72; --soft-bad: #3a1f1f; --soft-good: #17301f; --soft-warn: #38290f;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--card); border-bottom: 1px solid var(--line); }
+  .bar { max-width: 1100px; margin: 0 auto; padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
+  .bar h1 { font-size: 17px; margin: 0; letter-spacing: .2px; }
+  .status { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--muted); font-size: 13px; flex: 1; }
+  .status b { color: var(--ink); font-weight: 600; }
+  nav { max-width: 1100px; margin: 0 auto; padding: 0 16px; display: flex; gap: 2px; overflow-x: auto; }
+  nav button { border: 0; background: none; color: var(--muted); font: inherit; padding: 9px 12px; cursor: pointer; border-bottom: 3px solid transparent; white-space: nowrap; }
+  nav button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  nav button:hover { color: var(--ink); }
+  .count { display: inline-block; min-width: 1.6em; padding: 0 6px; margin-left: 4px; border-radius: 10px; background: var(--chip); color: var(--ink); font-size: 12px; text-align: center; }
+  .count.hot { background: var(--accent); color: var(--accent-ink); }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  h2 { font-size: 16px; margin: 26px 0 4px; }
+  h2:first-child { margin-top: 4px; }
+  .hint { color: var(--muted); margin: 0 0 10px; font-size: 13.5px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 10px 0; box-shadow: var(--shadow); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .grow { flex: 1; min-width: 200px; }
+  .title { font-weight: 600; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 10px; background: var(--chip); font-size: 12px; color: var(--ink); white-space: nowrap; }
+  .chip.good { background: var(--soft-good); color: var(--good); }
+  .chip.warn { background: var(--soft-warn); color: var(--warn); }
+  .chip.bad { background: var(--soft-bad); color: var(--bad); }
+  a { color: var(--accent); }
+  button.btn { font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
+  button.btn:hover { border-color: var(--accent); }
+  button.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button.btn.danger:hover { border-color: var(--bad); color: var(--bad); }
+  button.btn:disabled { opacity: .55; cursor: wait; }
+  button.link { border: 0; background: none; color: var(--accent); font: inherit; padding: 0; cursor: pointer; text-decoration: underline; }
+  textarea, input[type=text], input[type=search] { width: 100%; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; }
+  textarea { min-height: 84px; resize: vertical; }
+  textarea:focus, input:focus, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  details { margin: 6px 0; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13.5px; }
+  pre { white-space: pre-wrap; word-break: break-word; font: 12.5px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; margin: 6px 0; }
+  .jobs { margin: 4px 0 0; padding-left: 18px; }
+  .options { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .options button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+  .empty { text-align: center; color: var(--muted); padding: 34px 0; }
+  .thumbs { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+  .thumb { width: 220px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
+  .thumb img { display: block; width: 100%; height: 130px; object-fit: cover; object-position: top; cursor: zoom-in; background: var(--chip); }
+  .thumb div { padding: 6px 8px; font-size: 12.5px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; }
+  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 8px; max-width: min(92vw, 560px); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 30; }
+  #toast.show { opacity: 1; }
+  #toast.err { background: var(--bad); color: #fff; }
+  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink); width: min(980px, 94vw); max-height: 90vh; padding: 0; }
+  dialog::backdrop { background: rgba(0, 0, 0, .5); }
+  .dlg-head { display: flex; gap: 10px; align-items: flex-start; padding: 14px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--card); }
+  .dlg-body { padding: 4px 16px 18px; }
+  .dlg-body img.full { max-width: 100%; border: 1px solid var(--line); border-radius: 8px; margin: 6px 0; }
+  .step { display: flex; gap: 8px; padding: 3px 0; font-size: 13.5px; }
+  .step .n { color: var(--muted); min-width: 2em; }
+  .banner { padding: 10px 14px; border-radius: 8px; background: var(--soft-warn); color: var(--warn); margin-bottom: 12px; }
+  @media (max-width: 600px) { .thumb { width: 100%; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>Auto-Applier Desk</h1>
+    <div class="status" id="status" aria-live="polite"></div>
+  </div>
+  <nav id="tabs" role="tablist"></nav>
+</header>
+<main id="main"></main>
+<dialog id="dlg"></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+const TOKEN = "__TOKEN__";
+const TABS = [
+  ["needs", "Needs you"], ["unconfirmed", "Not confirmed"], ["failed", "Failed"], ["answers", "Saved answers"], ["sites", "Sites"], ["activity", "Activity"],
+];
+const state = { tab: "needs", inbox: null, overview: null, answers: null, sites: null, drafts: {}, picked: {}, filter: "", offline: "" };
+const last = {};                                  // the JSON text each tab was last drawn from, to redraw only when something changed
+
+// ---------------------------------------------------------------- small helpers
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, "");
+    else el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid === null || kid === undefined || kid === false) continue;
+    el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+const q = (sel) => document.querySelector(sel);
+const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + "s")}`;
+const pct = (x) => (x === null || x === undefined ? "?" : Math.round(Number(x) * 100) + "%");
+function ago(iso) {
+  const t = Date.parse(iso || "");
+  if (!t) return "";
+  const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (m < 2) return "just now";
+  if (m < 90) return m + " min ago";
+  if (m < 60 * 36) return Math.round(m / 60) + " h ago";
+  return Math.round(m / 1440) + " days ago";
+}
+function toast(text, bad) {
+  const t = q("#toast");
+  t.textContent = text;
+  t.className = "show" + (bad ? " err" : "");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { t.className = ""; }, bad ? 7000 : 3500);
+}
+async function get(path) {
+  const sep = path.includes("?") ? "&" : "?";
+  const r = await fetch(path + sep + "t=" + encodeURIComponent(TOKEN), { headers: { "X-Desk-Token": TOKEN } });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || r.statusText);
+  return body;
+}
+async function act(body, button) {
+  if (button) button.disabled = true;
+  try {
+    const r = await fetch("/api/act?t=" + encodeURIComponent(TOKEN), {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Desk-Token": TOKEN }, body: JSON.stringify(body),
+    });
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(out.error || r.statusText);
+    toast(out.message || "Done.");
+    await refresh(true);
+    return out;
+  } catch (e) {
+    toast(e.message, true);
+    return null;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+const asked = (text) => window.confirm(text);
+const fileUrl = (job, name) => `/file?job=${encodeURIComponent(job)}&name=${encodeURIComponent(name)}&t=${encodeURIComponent(TOKEN)}`;
+function link(url, text) {
+  return url ? h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, text || "Open the posting ↗") : null;
+}
+function who(j) {
+  return [h("span", { class: "title" }, j.title), h("span", { class: "muted" }, " @ " + (j.company || "?"))];
+}
+function btn(label, onclick, cls) {
+  const b = h("button", { class: "btn " + (cls || ""), type: "button" }, label);
+  b.addEventListener("click", () => onclick(b));
+  return b;
+}
+function detailsBtn(jobId) { return btn("Details", () => openJob(jobId)); }
+
+// ---------------------------------------------------------------- the header
+function drawStatus() {
+  const o = state.overview, bar = q("#status");
+  bar.replaceChildren();
+  if (state.offline) { bar.append(h("span", { class: "chip bad" }, state.offline)); return; }
+  if (!o) return;
+  if (!o.db) { bar.append("No database yet: the daemon has never run in this folder."); return; }
+  const d = o.daemon || {};
+  const cls = d.state === "running" ? "good" : d.state === "stalled" ? "warn" : "bad";
+  bar.append(h("span", { class: "chip " + cls }, "daemon " + (d.state || "unknown")));
+  if (o.cap) bar.append(h("span", {}, "today ", h("b", {}, `${(o.today || {}).submitted || 0} submitted`), ` · ${o.cap.used}/${o.cap.limit} of the daily cap`));
+  if (o.mode) bar.append(h("span", {}, "mode ", h("b", {}, o.mode)));
+  if (o.now && o.now.live) bar.append(h("span", {}, "applying: ", h("b", {}, o.now.title), " @ " + o.now.company));
+  else if (d.activity) bar.append(h("span", { title: d.activity }, d.activity.length > 70 ? d.activity.slice(0, 69) + "…" : d.activity));
+}
+function drawTabs() {
+  const nav = q("#tabs"), c = (state.inbox || {}).counts || {};
+  const badge = { needs: c.needs_you, unconfirmed: c.unconfirmed, failed: c.failed };
+  nav.replaceChildren(...TABS.map(([id, label]) => {
+    const b = h("button", { role: "tab", "aria-selected": String(state.tab === id), type: "button" }, label);
+    if (badge[id]) b.append(h("span", { class: "count" + (id === "needs" ? " hot" : "") }, badge[id]));
+    b.addEventListener("click", () => { state.tab = id; state.filter = ""; draw(true); refresh(true); });
+    return b;
+  }));
+  document.title = (c.needs_you ? `(${c.needs_you}) ` : "") + "Auto-Applier Desk";
+}
+
+// ---------------------------------------------------------------- tab: needs you
+function needsTab() {
+  const ib = state.inbox;
+  const out = [];
+  if (!ib.db) return [h("div", { class: "empty" }, "No database yet. Start the daemon once and come back.")];
+  const total = ib.counts.needs_you;
+  if (!total) out.push(h("div", { class: "empty" }, h("div", { class: "title" }, "Nothing is waiting for you."), "New questions and decisions appear here as the daemon meets them."));
+
+  if (ib.questions.length) {
+    out.push(h("h2", {}, `Questions the forms asked (${ib.questions.length})`),
+      h("p", { class: "hint" }, "The bot never guesses. Answer once and it is used for every future form that asks the same thing; the jobs waiting on it are tried again."));
+    ib.questions.forEach((x) => out.push(questionCard(x)));
+  }
+  const disputed = ib.fit.filter((f) => f.where === "disputed");
+  if (disputed.length) {
+    out.push(h("h2", {}, `Fit models disagree (${disputed.length})`),
+      h("p", { class: "hint" }, "One model would skip the posting for a deal-breaker, the other would apply. It is your call."));
+    disputed.forEach((f) => out.push(fitCard(f)));
+  }
+  if (ib.probation.length) {
+    out.push(h("h2", {}, `Sites on probation (${ib.probation.length})`),
+      h("p", { class: "hint" }, "These applications are filled in and parked, not sent. Look at the form pictures; when a kind of site looks right, trust it and the parked jobs are applied to."));
+    ib.probation.forEach((p) => out.push(probationCard(p)));
+  }
+  if (ib.apply_by_hand.length) {
+    out.push(h("h2", {}, `Apply yourself (${ib.apply_by_hand.length})`),
+      h("p", { class: "hint" }, "The posting sends you to the company's own site, which the bot does not fill in."));
+    ib.apply_by_hand.forEach((p) => out.push(jobCard(p, [["I applied", "applied", "primary"], ["Skip it", "skip", ""]])));
+  }
+  if (ib.verify.length) {
+    out.push(h("h2", {}, `Check by hand (${ib.verify.length})`),
+      h("p", { class: "hint" }, "A run was cut off while it was applying. Look at your applications (or your email) and say whether it went through."));
+    ib.verify.forEach((p) => out.push(jobCard(p, [["It went through", "applied", "primary"], ["It did not: try again", "retry", ""], ["Skip it", "skip", ""]], true)));
+  }
+  if (ib.other.length) {
+    out.push(h("h2", {}, `Other parked jobs (${ib.other.length})`));
+    ib.other.forEach((p) => out.push(jobCard(p, [["Try again", "retry", ""], ["I applied", "applied", ""], ["Skip it", "skip", ""]])));
+  }
+  const rest = ib.fit.filter((f) => f.where !== "disputed");
+  if (rest.length) {
+    out.push(h("h2", {}, `Skipped as not a fit (${rest.length})`),
+      h("p", { class: "hint" }, "Decided by the models. Overrule any of them here."));
+    out.push(h("details", {}, h("summary", {}, "Show them"), rest.map(fitCard)));
+  }
+  return out;
+}
+
+function questionCard(x) {
+  const id = x.key + "\u0001" + x.scope;
+  if (!(id in state.drafts)) state.drafts[id] = x.proposal || "";
+  const area = h("textarea", { "aria-label": "Your answer", placeholder: x.options.length ? "Pick an option" : "Your answer, in your own words" });
+  area.value = state.drafts[id];
+  area.addEventListener("input", () => { state.drafts[id] = area.value; });
+  const kids = [
+    h("div", { class: "row" }, h("div", { class: "grow title" }, x.text),
+      h("span", { class: "chip" }, x.kind), h("span", { class: "chip" }, plural(x.jobs.length, "job") + " waiting")),
+  ];
+  if (x.reason) kids.push(h("div", { class: "muted small" }, "Why it was not answered: " + x.reason));
+  kids.push(h("details", {}, h("summary", {}, "Which jobs"),
+    h("ul", { class: "jobs" }, x.jobs.map((j) => h("li", {}, who(j), " ", link(j.url, "↗"))))));
+  if (x.proposal) {
+    kids.push(h("div", { class: "row small", style: "margin-top:8px" },
+      h("span", { class: "chip " + (x.proposal_verified ? "good" : "warn") }, x.proposal_verified ? "Draft from your own resumes: checked" : "Draft from your own resumes: NOT checked"),
+      x.proposal_note ? h("span", { class: "muted" }, x.proposal_note) : null,
+      x.scope ? h("span", { class: "chip" }, "applies to " + x.scope + " only") : null));
+    if (x.proposal_basis) kids.push(h("details", {}, h("summary", {}, "Where it comes from"), h("pre", {}, x.proposal_basis)));
+  }
+  if (x.options.length && x.kind !== "combobox") {
+    const opts = h("div", { class: "options", role: "group", "aria-label": "Options the form offers" });
+    x.options.forEach((o) => {
+      const b = h("button", { class: "btn", type: "button", "aria-pressed": String(area.value.trim().toLowerCase() === o.toLowerCase()) }, o);
+      b.addEventListener("click", () => {
+        area.value = o; state.drafts[id] = o;
+        opts.querySelectorAll("button").forEach((c) => c.setAttribute("aria-pressed", String(c === b)));
+      });
+      opts.append(b);
+    });
+    kids.push(opts);
+  } else if (x.options.length) {
+    kids.push(h("div", { class: "muted small" }, "Options seen: " + x.options.join(" | ")));
+  }
+  kids.push(area);
+  kids.push(h("div", { class: "actions" },
+    btn(x.proposal && state.drafts[id] === x.proposal ? "Approve this answer" : "Save answer", async (b) => {
+      const text = area.value.trim();
+      if (!text) { toast("Write the answer first.", true); return; }
+      const done = await act({ action: "answer", key: x.key, scope: x.scope, text }, b);
+      if (done) delete state.drafts[id];
+    }, "primary"),
+    btn("Skip these jobs", async (b) => {
+      if (!asked(`Skip ${plural(x.jobs.length, "job")} for good rather than answer this?`)) return;
+      const done = await act({ action: "skip_question", key: x.key, scope: x.scope }, b);
+      if (done) delete state.drafts[id];
+    }, "danger"),
+    h("span", { class: "muted small" }, "Saving also tries the waiting jobs again.")));
+  return h("div", { class: "card" }, kids);
+}
+
+function fitCard(f) {
+  const kids = [
+    h("div", { class: "row" }, h("div", { class: "grow" }, who(f), " ", link(f.url, "↗")),
+      h("span", { class: "chip " + (f.where === "disputed" ? "warn" : "") }, f.stands), h("span", { class: "chip" }, "fit " + pct(f.score))),
+  ];
+  if (f.summary) kids.push(h("div", { class: "small" }, "Judge" + (f.model ? " (" + f.model + ")" : "") + ": " + f.summary));
+  f.deal_breakers.forEach((d) => kids.push(h("div", { class: "small", style: "color:var(--bad)" }, `Deal-breaker, ${d.issue}: “${d.quote}”`)));
+  if (f.review) {
+    kids.push(h("div", { class: "small", style: "margin-top:6px" }, `Second opinion (${f.review.model}): ${f.review.verdict || "?"} at ${pct(f.review.score)}. ${f.review.summary || ""}`));
+    f.review.deal_breakers.forEach((d) => kids.push(h("div", { class: "small", style: "color:var(--bad)" }, `Deal-breaker, ${d.issue}: “${d.quote}”`)));
+  }
+  kids.push(h("div", { class: "actions" },
+    btn("Apply anyway", (b) => act({ action: "fit", job_id: f.job_id, decision: "apply" }, b), "primary"),
+    btn("Skip for good", (b) => act({ action: "fit", job_id: f.job_id, decision: "skip" }, b), "danger"),
+    detailsBtn(f.job_id)));
+  return h("div", { class: "card" }, kids);
+}
+
+function probationCard(p) {
+  const kids = [
+    h("div", { class: "row" }, h("div", { class: "grow title" }, p.site),
+      h("span", { class: "chip " + (p.trusted ? "good" : "warn") }, p.trusted ? "trusted: ready to release" : "on probation"),
+      h("span", { class: "chip" }, `${p.clean_runs}/${p.needed} clean runs`), h("span", { class: "chip" }, plural(p.jobs.length, "job") + " held back")),
+  ];
+  const thumbs = h("div", { class: "thumbs" });
+  p.jobs.forEach((j) => {
+    const t = h("div", { class: "thumb" });
+    if (j.snapshot) {
+      const img = h("img", { src: fileUrl(j.job_id, "form_snapshot.png"), alt: "The filled-in form for " + j.title, loading: "lazy" });
+      img.addEventListener("click", () => openJob(j.job_id));
+      t.append(img);
+    }
+    t.append(h("div", {}, h("div", { class: "title" }, j.title), h("div", { class: "muted" }, j.company),
+      h("div", { class: "muted" }, `${j.answered} answered` + (j.unanswered ? `, ${j.unanswered} left blank` : "") + (j.fit_score !== null && j.fit_score !== undefined ? ` · fit ${pct(j.fit_score)}` : "")),
+      h("div", {}, link(j.url, "posting ↗"), " ", h("button", { class: "link", type: "button", onclick: () => openJob(j.job_id) }, "details"))));
+    thumbs.append(t);
+  });
+  kids.push(thumbs);
+  kids.push(h("div", { class: "actions" },
+    btn(p.trusted ? `Release these ${p.jobs.length} jobs` : `Trust ${p.site} and apply`, async (b) => {
+      if (!asked(`Trust "${p.site}"? From now on the bot submits applications there without asking, and the ${plural(p.jobs.length, "held job")} will be applied to.`)) return;
+      await act({ action: "trust_site", site: p.site }, b);
+    }, "primary"),
+    h("span", { class: "muted small" }, "Or leave it: nothing is sent until you trust the site.")));
+  return h("div", { class: "card" }, kids);
+}
+
+// A parked, unconfirmed or failed posting and what you can say about it. ``careful``: a retry might apply twice, so ask first.
+function jobCard(p, choices, careful) {
+  const buttons = choices.map(([label, decision, cls]) => btn(label, async (b) => {
+    if (decision === "skip" && !asked("Skip this posting for good?")) return;
+    if (decision === "applied" && !asked("Record this as applied? It will never be tried again.")) return;
+    if (decision === "retry" && (careful || p.kind === "verify" || p.status === "unconfirmed") && !asked("Only try again if you are sure it did NOT go through, or the company gets two applications. Continue?")) return;
+    await act({ action: "job", job_id: p.job_id, decision }, b);
+  }, cls === "danger" ? "danger" : cls));
+  return h("div", { class: "card" },
+    h("div", { class: "row" }, h("div", { class: "grow" }, who(p), " ", link(p.url, "Open the posting ↗")),
+      p.site ? h("span", { class: "chip" }, p.site) : null, p.when ? h("span", { class: "muted small" }, ago(p.when)) : null),
+    p.detail ? h("div", { class: "muted small" }, p.detail) : null,
+    h("div", { class: "actions" }, buttons, detailsBtn(p.job_id)));
+}
+
+// ---------------------------------------------------------------- lists: not confirmed / failed
+function listTab(kind) {
+  const rows = state.inbox[kind] || [];
+  const choices = kind === "unconfirmed"
+    ? [["It went through", "applied", "primary"], ["It did not: try again", "retry", ""], ["Skip it", "skip", ""]]
+    : [["Try again", "retry", "primary"], ["Skip it", "skip", ""], ["I applied", "applied", ""]];
+  const box = h("input", { type: "search", placeholder: "Filter by company, title or reason", "aria-label": "Filter", value: state.filter });
+  const list = h("div", {});
+  const draw1 = () => {
+    const f = box.value.toLowerCase();
+    state.filter = box.value;
+    const shown = rows.filter((r) => !f || (r.title + " " + r.company + " " + r.detail + " " + r.site).toLowerCase().includes(f)).slice(0, 80);
+    list.replaceChildren(...(shown.length ? shown.map((r) => jobCard({ ...r, status: kind }, choices, kind === "unconfirmed")) : [h("div", { class: "empty" }, "Nothing here.")]));
+    if (rows.length > shown.length && !f) list.append(h("p", { class: "muted small" }, `Showing the newest ${shown.length} of ${rows.length}. Filter to find the rest.`));
+  };
+  box.addEventListener("input", draw1);
+  draw1();
+  const intro = kind === "unconfirmed"
+    ? "The bot clicked Submit but never saw a confirmation. It does not retry these on its own (that could apply twice). Check the company's page or your email, then say what happened."
+    : "The bot could not finish these. It retries a few times by itself; use these buttons to retry now, or to give up on one.";
+  return [h("h2", {}, kind === "unconfirmed" ? `Sent, but not confirmed (${rows.length})` : `Failed (${rows.length})`), h("p", { class: "hint" }, intro), box, list];
+}
+
+// ---------------------------------------------------------------- tab: saved answers
+function answersTab() {
+  const rows = state.answers || [];
+  const q1 = h("input", { type: "text", placeholder: "The question, as a form would ask it", "aria-label": "Question" });
+  const a1 = h("textarea", { placeholder: "Your answer", "aria-label": "Answer", style: "margin-top:8px" });
+  const add = h("div", { class: "card" }, h("div", { class: "title" }, "Add an answer before a form asks"), q1, a1,
+    h("div", { class: "actions" }, btn("Save", async (b) => {
+      if (!q1.value.trim() || !a1.value.trim()) { toast("Write the question and the answer.", true); return; }
+      if (await act({ action: "save_answer", question: q1.value, text: a1.value }, b)) { q1.value = ""; a1.value = ""; }
+    }, "primary")));
+  const box = h("input", { type: "search", placeholder: "Filter", "aria-label": "Filter", value: state.filter });
+  const list = h("div", {});
+  const draw1 = () => {
+    const f = box.value.toLowerCase();
+    state.filter = box.value;
+    const shown = rows.filter((r) => !f || (r.question + " " + r.answer).toLowerCase().includes(f));
+    list.replaceChildren(...(shown.length ? shown.map(answerCard) : [h("div", { class: "empty" }, "No saved answers.")]));
+  };
+  box.addEventListener("input", draw1);
+  draw1();
+  return [h("h2", {}, `Saved answers (${rows.length})`), h("p", { class: "hint" }, "What the bot says when a form asks. It uses these before anything else, so a wrong one is repeated everywhere."), add, box, list];
+}
+function answerCard(r) {
+  const area = h("textarea", { "aria-label": "Answer to " + r.question });
+  area.value = r.answer;
+  return h("div", { class: "card" },
+    h("div", { class: "row" }, h("div", { class: "grow title" }, r.question), h("span", { class: "chip" }, r.source), h("span", { class: "muted small" }, ago(r.updated))),
+    area,
+    h("div", { class: "actions" },
+      btn("Save changes", (b) => act({ action: "save_answer", key: r.key, text: area.value }, b), "primary"),
+      btn("Forget", (b) => { if (asked("Forget this answer? The next form that asks it will be parked again.")) act({ action: "forget_answer", key: r.key }, b); }, "danger")));
+}
+
+// ---------------------------------------------------------------- tab: sites
+function sitesTab() {
+  const rows = state.sites || [];
+  const body = rows.length ? h("table", {},
+    h("thead", {}, h("tr", {}, ["Site", "State", "Clean runs", "Submitted", "Held back", ""].map((t) => h("th", {}, t)))),
+    h("tbody", {}, rows.map((s) => h("tr", {},
+      h("td", { class: "title" }, s.site),
+      h("td", {}, h("span", { class: "chip " + (s.trusted ? "good" : "warn") }, s.trusted ? "trusted" : "probation")),
+      h("td", {}, `${s.clean_runs}/${s.needed}`), h("td", {}, s.submitted), h("td", {}, s.parked),
+      h("td", {}, s.trusted
+        ? btn("Back to probation", (b) => { if (asked(`Put "${s.site}" back on probation? Its applications are filled in but not sent again until you trust it.`)) act({ action: "distrust_site", site: s.site }, b); })
+        : btn("Trust", (b) => { if (asked(`Trust "${s.site}"? Its applications are submitted without asking${s.parked ? ` and ${plural(s.parked, "held job")} will be applied to` : ""}.`)) act({ action: "trust_site", site: s.site }, b); }, "primary"))))))
+    : h("div", { class: "empty" }, "No site has been seen yet.");
+  return [h("h2", {}, "Kinds of site"), h("p", { class: "hint" }, "A kind of site is trusted once you approve it, one application there was confirmed, or enough applications were filled in cleanly. Until then it is filled in and held back."), h("div", { class: "card" }, body)];
+}
+
+// ---------------------------------------------------------------- tab: activity
+function activityTab() {
+  const o = state.overview || {};
+  const recent = o.recent || [];
+  const tone = { submitted: "good", unconfirmed: "warn", needs_review: "warn", failed: "bad", skipped: "", in_progress: "good" };
+  return [
+    h("h2", {}, "Latest outcomes"),
+    h("div", { class: "card" }, recent.length ? recent.map((a) => h("div", { class: "row", style: "padding:4px 0" },
+      h("span", { class: "chip " + (tone[a.status] || "") }, a.status.replace("_", " ")),
+      h("div", { class: "grow" }, who(a), a.detail ? h("div", { class: "muted small" }, a.detail) : null),
+      h("span", { class: "muted small" }, ago(a.when)), detailsBtn(a.job_id))) : h("div", { class: "empty" }, "Nothing yet.")),
+    h("h2", {}, "Daemon log"),
+    h("pre", {}, (o.log || []).join("\n") || "No log yet."),
+  ];
+}
+
+// ---------------------------------------------------------------- job details
+async function openJob(jobId) {
+  const dlg = q("#dlg");
+  dlg.replaceChildren(h("div", { class: "dlg-body" }, "Loading…"));
+  if (!dlg.open) dlg.showModal();
+  let d;
+  try { d = await get("/api/job?id=" + encodeURIComponent(jobId)); }
+  catch (e) { dlg.replaceChildren(h("div", { class: "dlg-body" }, "Could not load: " + e.message, h("div", { class: "actions" }, btn("Close", () => dlg.close())))); return; }
+  const job = d.job || {}, app = d.app || {};
+  const kids = [];
+  const meta = [app.status ? h("span", { class: "chip" }, app.status.replace("_", " ")) : null, app.error_code ? h("span", { class: "chip" }, app.error_code) : null,
+    job.location ? h("span", { class: "chip" }, job.location) : null, job.ats ? h("span", { class: "chip" }, job.ats) : null];
+  if (app.error_message) kids.push(h("p", {}, h("b", {}, "What happened: "), app.error_message));
+  if (d.fit) {
+    kids.push(h("h2", {}, "Fit"), h("p", { class: "small" }, `${d.fit.verdict || "?"} at ${pct(d.fit.score)} (${d.fit.model || "?"}). ${d.fit.summary || ""}`));
+    (d.fit.deal_breakers || []).forEach((x) => kids.push(h("div", { class: "small", style: "color:var(--bad)" }, `Deal-breaker, ${x.issue}: “${x.quote}”`)));
+  }
+  if (d.probation) kids.push(h("h2", {}, "Probation"), h("p", { class: "small" }, `${d.probation.site}: ${d.probation.clean_runs}/${d.probation.needed} clean runs. Look at the picture below; if it is right, trust the site on the main page.`));
+  if (d.shots.length) {
+    kids.push(h("h2", {}, "Pictures"));
+    d.shots.forEach((name) => kids.push(h("div", {}, h("div", { class: "muted small" }, name), h("img", { class: "full", src: fileUrl(jobId, name), alt: name, loading: "lazy" }))));
+  }
+  if (d.answers.length) {
+    kids.push(h("h2", {}, "Answers it gave and questions it left"));
+    d.answers.forEach((a) => {
+      const done = a.answered, left = a.unanswered;
+      if (done) kids.push(h("div", { class: "small", style: "padding:2px 0" }, h("b", {}, done.question), "  →  " + done.answer, h("span", { class: "chip", style: "margin-left:6px" }, done.source || "?")));
+      else if (left) kids.push(h("div", { class: "small", style: "padding:2px 0;color:var(--warn)" }, h("b", {}, left.label || "(question)"), "  left blank: " + (left.reason || "")));
+    });
+  }
+  if (d.steps.length) {
+    kids.push(h("h2", {}, "What the agent did"));
+    d.steps.forEach((s) => kids.push(h("div", { class: "step" }, h("span", { class: "n" }, "#" + (s.step ?? "")), h("span", {}, `${s.decision || ""} ${s.target || ""}`.trim(), h("span", { class: "muted" }, s.why ? " — " + s.why : "")))));
+  }
+  if (d.description) kids.push(h("details", {}, h("summary", {}, "The posting's text"), h("pre", {}, d.description)));
+  dlg.replaceChildren(
+    h("div", { class: "dlg-head" }, h("div", { class: "grow" }, h("div", { class: "title" }, job.title || jobId, h("span", { class: "muted" }, " @ " + (job.company || ""))),
+      h("div", { class: "row small", style: "margin-top:4px" }, meta, link(job.apply_url, "Open the posting ↗"))), btn("Close", () => dlg.close())),
+    h("div", { class: "dlg-body" }, kids));
+}
+q("#dlg").addEventListener("click", (e) => { if (e.target === q("#dlg")) q("#dlg").close(); });
+
+// ---------------------------------------------------------------- drawing and refreshing
+function draw(force) {
+  drawStatus();
+  drawTabs();
+  const main = q("#main");
+  if (!state.inbox) { if (!state.offline) main.replaceChildren(h("div", { class: "empty" }, "Loading…")); return; }
+  const key = state.tab + JSON.stringify([state.inbox, state.tab === "answers" ? state.answers : null, state.tab === "sites" ? state.sites : null, state.tab === "activity" ? state.overview : null]);
+  if (!force && last.main === key) return;
+  const el = document.activeElement;
+  if (!force && el && main.contains(el) && /^(TEXTAREA|INPUT)$/.test(el.tagName)) return;      // never redraw under the cursor
+  last.main = key;
+  const pieces = state.tab === "needs" ? needsTab() : state.tab === "unconfirmed" ? listTab("unconfirmed") : state.tab === "failed" ? listTab("failed")
+    : state.tab === "answers" ? answersTab() : state.tab === "sites" ? sitesTab() : activityTab();
+  main.replaceChildren(...pieces);
+}
+async function refresh(force) {
+  try {
+    const [ov, ib] = await Promise.all([get("/api/overview"), get("/api/inbox")]);
+    state.overview = ov; state.inbox = ib; state.offline = "";
+    if (state.tab === "answers") state.answers = await get("/api/answers");
+    if (state.tab === "sites") state.sites = await get("/api/sites");
+  } catch (e) {
+    state.offline = /reload/i.test(e.message) ? "Reload this page" : "The desk stopped answering";
+  }
+  draw(force);
+}
+refresh(true);
+setInterval(() => { if (!document.hidden) refresh(false); }, 15000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(false); });
+</script>
+</body>
+</html>

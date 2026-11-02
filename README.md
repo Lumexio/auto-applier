@@ -141,6 +141,11 @@ This project takes the opposite approach:
   latest cycle's funnel, which models are loaded), the job being worked on right now with its step-by-step agent flow,
   recent applications you can open to see the fit verdict, answers and every step with who decided it, plus questions
   waiting for you and the trust state of each site. Read-only: it only watches what the daemon writes.
+- **Web interface** (`gui.bat`, http://127.0.0.1:8765/): everything that needs a person on one page. Answer the questions the
+  forms asked (a draft from your own resumes is already in the box, with the lines it rests on), settle fit decisions the models
+  disagreed about, look at the filled-in forms of a site on probation and trust it, and finish by hand the jobs that send you to
+  the company's own site. Every button does what the matching command does; nothing is submitted from the page. Listens on this
+  computer only.
 - **CLI** for the daemon, answers and site trust.
 - **Local REST API** (loopback only, bearer-token protected) for profile, status, scrape/filter/apply.
 - **Langflow** visual pipeline (optional) with ready-made components.
@@ -218,7 +223,8 @@ Then run it for real, either `python daemon.py` or `setup.bat -All -Background`.
 | `python fit_review.py list` / `show` / `approve <job>` / `reject <job>` | See postings the models vetoed or disagreed about, and overrule them |
 | `python source.py sync` / `show` / `check` | Copy your resumes into `me/`, see the years the bot computes from them and why, find contradictions |
 | `python pending.py [--watch 60]` | One screen of everything waiting for you, with the command or link for each |
-| `setup.bat -Desk` / `-EnableDesk` | Open dashboard + pending list + daemon log in one terminal window, and the Langflow web UI in your browser, now / at every Windows login (`-NoGui` skips the browser) |
+| `gui.bat` | The web interface for what needs you: answer, decide, finish by hand (`--demo` for made-up data, `--port N`) |
+| `setup.bat -Desk` / `-EnableDesk` | Open dashboard + pending list + daemon log in one terminal window, and the web interface and Langflow in your browser, now / at every Windows login (`-NoGui` skips the browser) |
 | `tui.bat` | Live terminal dashboard (`--demo` for made-up data, `--once` to print a text snapshot) |
 | `python api.py --port 8000` | Local REST API |
 | `setup.bat -Status` | Show daemon / API / Langflow state |
@@ -239,6 +245,7 @@ Then run it for real, either `python daemon.py` or `setup.bat -All -Background`.
 | `state.py`, `schema.sql`, `sites.py` | SQLite state, migrations, site trust (probation) |
 | `fit.py`, `fit_review.py` | Model fit scoring (facts check, second opinion) and the command to overrule it |
 | `api.py` | Local REST API |
+| `gui/`, `gui.bat` | The web interface for what needs a person (standard library only: `service.py` is what the buttons do, `server.py` the local HTTP side, `static/index.html` the page) |
 | `tui/`, `tui.bat` | Read-only terminal dashboard (data and rendering use only the standard library and `rich`; the Textual app runs in its own `.venv-tui`) |
 | `profile_gen.py` | Builds `profile.json` from your resume; leaves empty whatever the resume does not state |
 | `config.yaml`, `config_loader.py` | The shared defaults, and the loader that merges your own `config.local.yaml` (never committed) over them |

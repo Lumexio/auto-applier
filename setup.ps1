@@ -2,7 +2,7 @@
 # AI Auto Job Applier — Setup & Bootstrapper (PowerShell)
 # Usage:
 #   ./setup                       (Interactive menu)
-#   ./setup -All -Background      (Start All-in-One: Daemon + API + Langflow)
+#   ./setup -All -Background      (Start All-in-One: Daemon + web interface + API + Langflow)
 #   ./setup -StopAll              (Stop all background services)
 #   ./setup -EnableAutoStart      (Enable auto-start on Windows PC boot/login)
 #   ./setup -DisableAutoStart     (Disable auto-start on Windows PC boot/login)
@@ -14,6 +14,7 @@
 #   ./setup -StopDaemon           (Stop running background daemon)
 #   ./setup -Status               (Check all services, autostart & log status)
 #   ./setup -Logs                 (Stream live daemon logs)
+#   ./setup -Gui                  (Open the web interface for what needs you, http://127.0.0.1:8765/, starting it if needed)
 #   ./setup -Langflow             (Launch Langflow Web UI)
 #   ./setup -Api                  (Start local REST API on port 8000)
 #   ./setup -DryRun               (Execute single dry-run cycle)
@@ -43,6 +44,7 @@ param (
     [switch]$DisableDesk,
     [switch]$DaemonOnly,
     [switch]$NoGui,
+    [switch]$Gui,
     [string]$Login = "",
     [string]$Browser = "firefox"
 )
@@ -55,7 +57,7 @@ Write-Host "`n=======================================================" -Foregrou
 Write-Host "   AI Parallel Auto Job Applier - Setup & Launcher" -ForegroundColor Cyan
 Write-Host "=======================================================`n" -ForegroundColor Cyan
 
-$isQuickOp = $Status -or $Logs -or $StopAll -or $StopDaemon -or $DisableAutoStart -or $SkipChecks -or $Desk -or $EnableDesk -or $DisableDesk
+$isQuickOp = $Status -or $Logs -or $StopAll -or $StopDaemon -or $DisableAutoStart -or $SkipChecks -or $Desk -or $EnableDesk -or $DisableDesk -or $Gui
 
 if (-not $isQuickOp) {
     # 1. Verify Python
@@ -178,6 +180,30 @@ function Stop-DaemonProcess {
     }
 }
 
+# The web interface for what needs you (python -m gui). It answers on this computer only.
+$GuiPort = 8765
+
+function Start-DeskGui {
+    $guiPidFile = Join-Path $ProjectDir ".gui.pid"
+    if (Test-Path $guiPidFile) {
+        $gPid = Get-Content $guiPidFile -ErrorAction SilentlyContinue
+        if ($gPid -and (Test-OwnProcess $gPid "-m gui --port")) {
+            Write-Host "Web interface already running on http://127.0.0.1:$GuiPort/ (PID: $gPid)." -ForegroundColor Yellow
+            return
+        }
+        Remove-Item $guiPidFile -Force -ErrorAction SilentlyContinue
+    }
+    $guiCim = Get-CimInstance Win32_Process -Filter "Name = 'python.exe' AND CommandLine LIKE '%-m gui --port%'" -ErrorAction SilentlyContinue
+    if ($guiCim) {
+        Write-Host "Web interface already running on http://127.0.0.1:$GuiPort/ (PID: $($guiCim[0].ProcessId))." -ForegroundColor Yellow
+        return
+    }
+    Write-Host "`n[Action] Launching the web interface at http://127.0.0.1:$GuiPort/..." -ForegroundColor Cyan
+    $guiProc = Start-Process python -ArgumentList @("-u", "-m", "gui", "--port", "$GuiPort") -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru
+    $guiProc.Id | Out-File $guiPidFile -Encoding ascii
+    Write-Host "Web interface running in background on http://127.0.0.1:$GuiPort/ (PID: $($guiProc.Id))." -ForegroundColor Green
+}
+
 function Start-AllServices ([switch]$AsBackground, [string]$BrowserEngine = "firefox") {
     Write-Host "`n=======================================================" -ForegroundColor Cyan
     Write-Host "   Starting All Auto Applier Services (All-in-One)" -ForegroundColor Cyan
@@ -185,6 +211,9 @@ function Start-AllServices ([switch]$AsBackground, [string]$BrowserEngine = "fir
 
     # 1. Daemon
     Start-DaemonProcess -AsBackground:$AsBackground -BrowserEngine $BrowserEngine
+
+    # 1b. Web interface for what needs you, on port 8765
+    Start-DeskGui
 
     # 2. REST API on port 8000
     $apiPidFile = Join-Path $ProjectDir ".api.pid"
@@ -234,7 +263,7 @@ function Start-AllServices ([switch]$AsBackground, [string]$BrowserEngine = "fir
         Write-Host "Langflow Web UI running in background on http://localhost:7860 (PID: $($lfProc.Id))." -ForegroundColor Green
     }
 
-    Write-Host "`nAll 3 services are active in the background." -ForegroundColor Green
+    Write-Host "`nAll 4 services are active in the background." -ForegroundColor Green
     Write-Host " - Stop all: ./setup -StopAll" -ForegroundColor DarkGray
     Write-Host " - Status:   ./setup -Status" -ForegroundColor DarkGray
 }
@@ -282,6 +311,24 @@ function Stop-AllServices {
         foreach ($item in $lfProcs) {
             Stop-Process -Id $item.ProcessId -Force -ErrorAction SilentlyContinue
             Write-Host "Stopped Langflow process (PID: $($item.ProcessId))." -ForegroundColor Green
+        }
+    }
+
+    # 4. Stop the web interface
+    $guiPidFile = Join-Path $ProjectDir ".gui.pid"
+    if (Test-Path $guiPidFile) {
+        $targetPid = Get-Content $guiPidFile -ErrorAction SilentlyContinue
+        if ($targetPid -and (Test-OwnProcess $targetPid "-m gui --port")) {
+            Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
+            Write-Host "Web interface (PID: $targetPid) stopped." -ForegroundColor Green
+        }
+        Remove-Item $guiPidFile -Force -ErrorAction SilentlyContinue
+    }
+    $guiProcs = Get-CimInstance Win32_Process -Filter "Name = 'python.exe' AND CommandLine LIKE '%-m gui --port%'" -ErrorAction SilentlyContinue
+    if ($guiProcs) {
+        foreach ($item in $guiProcs) {
+            Stop-Process -Id $item.ProcessId -Force -ErrorAction SilentlyContinue
+            Write-Host "Stopped web interface process (PID: $($item.ProcessId))." -ForegroundColor Green
         }
     }
 }
@@ -413,6 +460,21 @@ function Show-DaemonStatus {
         Write-Host "  Langflow UI:   STOPPED" -ForegroundColor Yellow
     }
 
+    # 3b. Web interface for what needs you
+    $guiPidFile = Join-Path $ProjectDir ".gui.pid"
+    $guiPid = if (Test-Path $guiPidFile) { Get-Content $guiPidFile -ErrorAction SilentlyContinue } else { $null }
+    $guiProc = if ($guiPid -and (Test-OwnProcess $guiPid "-m gui --port")) { Get-Process -Id $guiPid -ErrorAction SilentlyContinue } else { $null }
+    if (-not $guiProc) {
+        $guiCim = Get-CimInstance Win32_Process -Filter "Name = 'python.exe' AND CommandLine LIKE '%-m gui --port%'" -ErrorAction SilentlyContinue
+        if ($guiCim) { $guiProc = $guiCim[0] }
+    }
+    if ($guiProc) {
+        $pIdVal = if ($guiProc.Id) { $guiProc.Id } else { $guiProc.ProcessId }
+        Write-Host "  Web interface: RUNNING (PID: $pIdVal) -> http://127.0.0.1:$GuiPort/" -ForegroundColor Green
+    } else {
+        Write-Host "  Web interface: STOPPED" -ForegroundColor Yellow
+    }
+
     # 4. Windows Auto-Start Status
     $startupVbs = Join-Path ([System.IO.Path]::Combine($env:APPDATA, "Microsoft\Windows\Start Menu\Programs\Startup")) "AutoJobApplierAll.vbs"
     if (Test-Path $startupVbs) {
@@ -442,6 +504,13 @@ if ($All) {
 
 if ($StopAll) {
     Stop-AllServices
+    exit 0
+}
+
+if ($Gui) {
+    Start-DeskGui
+    Start-Sleep -Seconds 2
+    Start-Process "http://127.0.0.1:$GuiPort/"
     exit 0
 }
 

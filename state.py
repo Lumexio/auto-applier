@@ -522,6 +522,35 @@ class StateStore:
         self.conn.commit()
         return cur.rowcount
 
+    def jobs_waiting_on(self, question_key: str, scope: str | None = None) -> list[dict[str, Any]]:
+        """The postings stopped by one question (``scope`` narrows to the rows whose draft named that company)."""
+        rows = self.conn.execute(
+            """
+            SELECT DISTINCT p.job_id, COALESCE(j.title, '') AS title, COALESCE(j.company, '') AS company, COALESCE(j.apply_url, '') AS url
+              FROM pending_questions p LEFT JOIN jobs j ON j.id = p.job_id
+             WHERE p.question_key = ? AND (? IS NULL OR p.proposal_scope = ?)
+             ORDER BY j.company, j.title
+            """,
+            (question_key, scope, scope),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def drop_pending_for_job(self, job_id: str) -> int:
+        """Forget every question that was holding this posting up (you decided it is not worth answering them)."""
+        cur = self.conn.execute("DELETE FROM pending_questions WHERE job_id = ?", (job_id,))
+        self.conn.commit()
+        return cur.rowcount
+
+    def list_answers(self) -> list[dict[str, Any]]:
+        """Every answer saved for the bot to use, whoever wrote it (a key ending ``@company`` applies to that company only)."""
+        rows = self.conn.execute("SELECT question_key, question_text, answer, source, updated_at FROM answer_bank ORDER BY question_text").fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_answer(self, question_key: str) -> bool:
+        cur = self.conn.execute("DELETE FROM answer_bank WHERE question_key = ?", (question_key,))
+        self.conn.commit()
+        return cur.rowcount > 0
+
     def jobs_ready_to_requeue(self) -> list[str]:
         """Jobs parked for missing answers whose every pending question has since been answered."""
         rows = self.conn.execute(
@@ -538,6 +567,45 @@ class StateStore:
         cur = self.conn.execute(
             "DELETE FROM applications WHERE job_id = ? AND status = 'needs_review' AND error_code = 'needs_answers'", (job_id,)
         )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    # ---- What you decide about a posting the bot could not finish ---------------------------------------
+
+    # Where a person can still change the outcome. An application in progress, a duplicate and a submitted one are left alone.
+    _DECIDABLE = ("needs_review", "unconfirmed", "failed", "skipped")
+
+    def mark_applied_by_hand(self, job_id: str) -> bool:
+        """You applied yourself (or saw that an unconfirmed attempt did go through): record it as submitted, so it is never tried again."""
+        now = utc_now()
+        marks = ",".join("?" for _ in self._DECIDABLE)
+        cur = self.conn.execute(
+            f"""
+            UPDATE applications
+               SET status = 'submitted', submitted_at = COALESCE(submitted_at, ?), finished_at = ?, error_code = NULL,
+                   error_message = 'applied by hand (marked in the web interface)', approved_by_user = 1, approval_at = ?
+             WHERE job_id = ? AND status IN ({marks})
+            """,
+            (now, now, now, job_id, *self._DECIDABLE),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def skip_by_hand(self, job_id: str, reason: str = "you chose to skip this posting") -> bool:
+        """Never apply to this posting: a skip with a reason code is final (``is_already_submitted`` keeps it out of every queue)."""
+        marks = ",".join("?" for _ in self._DECIDABLE)
+        cur = self.conn.execute(
+            f"UPDATE applications SET status = 'skipped', error_code = 'declined', error_message = ?, finished_at = ? WHERE job_id = ? AND status IN ({marks})",
+            (reason[:300], utc_now(), job_id, *self._DECIDABLE),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def retry_by_hand(self, job_id: str) -> bool:
+        """Forget the parked or failed attempt so the posting is queued again (when it is still listed, the next cycle applies to it).
+        The caller must have checked that an ``unconfirmed`` attempt did not go through: this would apply a second time."""
+        marks = ",".join("?" for _ in self._DECIDABLE)
+        cur = self.conn.execute(f"DELETE FROM applications WHERE job_id = ? AND status IN ({marks})", (job_id, *self._DECIDABLE))
         self.conn.commit()
         return cur.rowcount > 0
 
