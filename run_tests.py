@@ -321,6 +321,7 @@ def main():
         ("Page Furniture, Dropdowns and Generic Uploads", "test_p13_widgets"),
         ("Degrees, Grades and Company Counts (from your resumes)", "test_p14_education"),
         ("Word and PDF Resumes", "test_p17_documents"),
+        ("Custom File Pickers", "test_p18_picker"),
         ("Repository Hygiene (public repo)", "test_repo_hygiene"),
         ("Documentation (links and commands the guides name)", "test_docs"),
         ("Multi-user Readiness (config layers, profile, licence)", "test_p8_multiuser"),

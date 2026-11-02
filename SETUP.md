@@ -379,6 +379,12 @@ agent:
     clean_runs_to_trust: 3      # 0 = only your approval (or a confirmed submission) can trust a site
 ```
 
+**Uploads.** The agent attaches your resume (`attachments.resume_path`, or the version that fits the job) and, where a form has a slot for it, `attachments.cover_letter_path`. A form's own file
+fields are filled in directly. A page that makes its file input only when a button is pressed (an "Upload resume" button, a "Drop your resume here or click to browse" zone) is handled too:
+the agent presses the button once and hands the file to the picker that opens, but only for a button that names the resume or the cover letter (on its own or through the
+label beside it), only when the form has no file field of that kind, and only when that file is configured and exists. A button for anything else (a photo, a transcript) is never pressed,
+and a generic required slot gets `attachments.default_path` if you set one. The trace (`steps.jsonl`, the `so_far` of the next step) says which button was pressed and whether the page then showed the file's name.
+
 Leave `outreach.enabled: false`. Recruiter outreach is the least finished part: it has no approval step yet, so nothing it would send
 is shown to you first. It stays off until a draft-and-approve queue exists.
 
@@ -831,7 +837,7 @@ python -m pytest tests -q
 python run_tests.py
 ```
 
-The suite has 455 tests under pytest and takes about five minutes. It includes real-browser tests against a fake application server. `run_tests.py` is a
+The suite has 478 tests under pytest and takes about five minutes. It includes real-browser tests against a fake application server. `run_tests.py` is a
 dependency-free runner of the main suites (it does not need pytest).
 Tests that need a Playwright browser are skipped if none is installed. The suite is built around local fake
 servers and stubbed models, so it does not need Ollama or an internet connection.

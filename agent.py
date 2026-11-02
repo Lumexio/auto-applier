@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from llm_client import LLMError, chat_json, for_task
-from page_state import SAFE_CATEGORIES, Action, PageSnapshot, take_snapshot
+from page_state import SAFE_CATEGORIES, Action, PageSnapshot, take_snapshot, upload_button_kind
 from sites import ATS_HOSTS, site_fingerprint
 
 DEFAULT_AGENT_CFG: dict[str, Any] = {
@@ -122,6 +122,7 @@ class ApplyAgent:
         self._tried: Counter[tuple[str, str, str]] = Counter()
         self._fills: Counter[str] = Counter()
         self._visits: Counter[str] = Counter()
+        self._pressed_uploads: set[tuple[str, str]] = set()   # (document, button) already tried: a button that stays on the page is not pressed again
         self._answering = 0.0                              # seconds spent drafting answers: a long form must not use up the page-walking budget
         self._after_apply = False
         self._after_click: tuple[frozenset[str], set[str]] | None = None   # (question labels, errors) just before the last step click
@@ -204,7 +205,7 @@ class ApplyAgent:
             if a.category == "cookie_reject" and not self._tried_before(sig, a):
                 return Decision("click", a, "decline the cookie banner")
 
-        needs_fill = any(not q.value for q in snap.questions) or any(not f.has_file for f in snap.files)
+        needs_fill = any(not q.value for q in snap.questions) or any(not f.has_file for f in snap.files) or bool(self._upload_buttons(snap))
         if needs_fill and self._fills[sig] < 2:
             return Decision("fill", why="answer the visible questions and attach files")
 
@@ -316,6 +317,35 @@ class ApplyAgent:
                         raise AgentStop("unsupported", f"could not attach a file to '{name}': {e}") from e
             if f.required:
                 raise AgentStop("needs_input", f"the form requires a file for '{name}' and none is configured in profile.attachments", [f"upload: {name}"])
+        self._press_upload_buttons(snap)
+
+    def _upload_buttons(self, snap: PageSnapshot) -> list[tuple[Action, str, str]]:
+        """Upload buttons that are not a file field (a custom picker: the page makes its file input when the button is pressed), the document
+        each is for, and the file to give it. Only a button that names the resume or the cover letter, only one this form has no file field
+        for, only a file that is configured and exists, and each button once."""
+        attachments = self.profile.get("attachments") or {}
+        found = []
+        for a in snap.actions:
+            if a.category != "upload":
+                continue
+            kind = upload_button_kind(a.label, a.near)
+            path = attachments.get("resume_path" if kind == "resume" else "cover_letter_path") if kind != "other" else None
+            if any(f.kind == kind for f in snap.files) or not path or not Path(path).is_file():                  # kind "other" has no path
+                continue
+            if (kind, a.label.lower()) not in self._pressed_uploads and hasattr(self.session, "upload_via_button"):
+                found.append((a, kind, path))
+        return found
+
+    def _press_upload_buttons(self, snap: PageSnapshot) -> None:
+        for a, kind, path in self._upload_buttons(snap):
+            self._pressed_uploads.add((kind, a.label.lower()))
+            document = kind.replace("_", " ")
+            try:
+                shown = self.session.upload_via_button(a, path)
+            except Exception as e:                               # a site that refuses is told apart later, by the step that needed the file
+                self.history.append(f"could not attach the {document} with the '{a.label}' button: {e}")
+                continue
+            self.history.append(f"attached the {document} with the '{a.label}' button" + ("" if shown else " (the page did not show its name)"))
 
     def _check_step_was_accepted(self, snap: PageSnapshot) -> None:
         """After Next/Continue/Submit: new error messages on the very same form mean the site refused the step.
@@ -373,7 +403,7 @@ class ApplyAgent:
             "questions": len(snap.questions), "files": len(snap.files), "errors": snap.errors[:3],
             "actions": [f"{a.category}:{a.label}" for a in snap.actions if a.category != "never"][:15],
             "decision": decision.kind, "target": decision.action.label if decision.action else None,
-            "why": decision.why, "source": decision.source,
+            "why": decision.why, "source": decision.source, "so_far": self.history[-3:],       # what was done before this step, e.g. a file attached
         }
         self.trace.append(entry)
         if not self.trace_dir:

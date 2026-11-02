@@ -9,7 +9,7 @@ by [Ollama](https://ollama.com), and everything that matters for safety is decid
 
 > **Status:** MVP. The whole loop works end to end: find, filter, check fit, answer, fill in, submit, verify, and
 > hand you whatever needs a person. The pipeline, the answer engine, the agent and the safety rails are covered by
-> 455 automated tests, but a brand-new install has no application history, so **every kind of site starts on
+> 478 automated tests, but a brand-new install has no application history, so **every kind of site starts on
 > probation** (filled in and reviewed, not submitted) until you approve it. See [What the MVP includes](#what-the-mvp-includes)
 > for exactly what is in and what is not, and the [Safety model](#safety-model).
 > Setup instructions are in **[SETUP.md](SETUP.md)**.
@@ -94,7 +94,7 @@ The loop below is built, tested and run by the daemon today. Each row points at 
 | **Unattended** | Single-instance lock, graceful shutdown, interrupted work parked for review, an Ollama wait at login, circuit breaker for failing models, and a status file the dashboards read to tell you when it needs a restart. |
 | **Modest hardware** | Works with one 7B model on 8 GB of VRAM (about 3 seconds per short call) or on a CPU, inside Ollama's default 2048-token window. |
 | **Yours to configure** | Defaults in `config.yaml`, your own changes in `config.local.yaml`; per-site, per-model, per-filter switches; MIT licensed. |
-| **Tested** | 455 tests, including real browsers driven against a fake application server. They need neither Ollama nor an internet connection. |
+| **Tested** | 478 tests, including real browsers driven against a fake application server. They need neither Ollama nor an internet connection. |
 | **Platform** | Windows 11 and Python 3.14. The Python core is portable; the launcher, desk and login entry are Windows-only. |
 
 ### Not in the MVP yet
@@ -103,7 +103,6 @@ The loop below is built, tested and run by the daemon today. Each row points at 
 |---|---|
 | Recruiter outreach | Built but **off** (`outreach.enabled: false`). A draft-and-approve queue, so that nothing is ever sent without your OK, comes first. |
 | Re-checking `unconfirmed` applications | They are listed for you to check by hand (web interface, tab *Not confirmed*). Nothing looks them up automatically. |
-| File pickers that are not a plain upload field | The agent uploads through ordinary `<input type="file">` fields. A custom picker is not handled yet: read `applications/<job>/trace/` to see where such a job stopped. |
 | CAPTCHAs, new accounts, email codes | Never, by design: those jobs are skipped or parked for you. |
 | Writing your resume or cover letters | The cover letter is a template in `profile.json`. |
 | A launcher outside Windows | Run `python daemon.py` and the commands in [Everyday commands](#everyday-commands) directly. |
@@ -171,7 +170,8 @@ The loop below is built, tested and run by the daemon today. Each row points at 
 - Dedicated handlers: **Greenhouse, Lever, Workday, LinkedIn Easy Apply, Handshake Quick Apply**.
 - For everything else (and for "apply on the company site" links from LinkedIn/Handshake) an
   **observe → decide → act → verify** agent takes over. It works in new tabs, iframes and shadow DOM, handles
-  multi-step wizards, declines cookie banners, uploads your résumé, and notices when a site rejected a step.
+  multi-step wizards, declines cookie banners, uploads your résumé (into a file field, or through an "Upload resume" button or drop zone that opens a file picker),
+  and notices when a site rejected a step.
 - The same agent **takes over from a dedicated handler** that finds nothing it knows how to do on a page (LinkedIn or Handshake
   with no apply button it recognises). It reads the page: a closed posting is recorded as closed, not as a failure; a link the
   script had no selector for is followed; a sign-in wall or a CAPTCHA is named. `agent.takeover: false` turns this off.
