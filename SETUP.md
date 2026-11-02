@@ -509,11 +509,39 @@ How outcomes are recorded:
 | Status | Meaning |
 |---|---|
 | `submitted` | The site confirmed it (confirmation text or URL seen) |
-| `unconfirmed` | Submit was clicked but no confirmation appeared. **Never retried automatically**; check the site |
+| `unconfirmed` | Submit was clicked but no confirmation appeared. **Never sent again automatically**. On LinkedIn and Handshake the bot looks at the posting again later (below); anywhere else check the site |
 | `needs_review` | Parked: needs an answer, the form rejected the submit, probation, or an interrupted run |
 | `failed` | Error; retried up to `stage3.max_attempts` |
 | `skipped` | A CAPTCHA challenge on screen (the reason names what was seen), login wall, closed posting, or a poor fit. Closed and not-a-fit are permanent; a CAPTCHA skip is retried later |
 | `duplicate` | The site says it was already applied to |
+
+#### A second look at `unconfirmed` applications
+
+LinkedIn and Handshake remember what you applied to: a posting you applied to shows "Applied 2 days ago" and "See application status".
+So after each cycle the daemon opens the oldest `unconfirmed` applications on those two sites and reads the page. When it says you
+applied, the application is recorded as `submitted` (the note says which words were seen). Nothing else changes: the bot never clicks,
+fills in or sends anything on that look, never answers a CAPTCHA, and a late confirmation does not make the site trusted
+(probation is unchanged).
+
+A look that proves nothing is written down and not held against the application: a redirect to a sign-in page (the log asks you to
+sign in again with `python daemon.py --login <url>`, and that site's other postings wait for the next cycle), a CAPTCHA, or a page that
+ended up on a different posting. A page that is fine but does not say you applied counts as one miss. After `max_checks` misses the
+application is left to you.
+
+```yaml
+reverify:
+  enabled: true
+  sites: [linkedin, handshake]   # sites that remember applications; on any other site a second look proves nothing
+  min_age_hours: 6               # time the site gets to show the application before the first look
+  recheck_hours: 24              # between two looks at the same posting
+  max_checks: 4                  # looks that found the posting without a sign of an application
+  max_per_cycle: 5
+```
+
+```powershell
+python reverify.py status    # each unconfirmed application, how often it was looked at and what the last look found
+python reverify.py run       # look now (stop the daemon first: both use the bot's browser)
+```
 
 ### 7.4 Fit vetoes: check what the models skipped
 
@@ -837,7 +865,7 @@ python -m pytest tests -q
 python run_tests.py
 ```
 
-The suite has 478 tests under pytest and takes about five minutes. It includes real-browser tests against a fake application server. `run_tests.py` is a
+The suite has 490 tests under pytest and takes about five minutes. It includes real-browser tests against a fake application server. `run_tests.py` is a
 dependency-free runner of the main suites (it does not need pytest).
 Tests that need a Playwright browser are skipped if none is installed. The suite is built around local fake
 servers and stubbed models, so it does not need Ollama or an internet connection.
@@ -856,7 +884,7 @@ servers and stubbed models, so it does not need Ollama or an internet connection
 | "Another daemon instance is actively running" | A daemon is already running (`setup.bat -Status`). If it is not, the lock is stale: `setup.bat -StopAll` |
 | LinkedIn / Handshake return nothing | Session expired. Run `python daemon.py --login <url>` again |
 | A site is always `unsupported` / parked | Open `applications/<job>/trace/` and read the last step and screenshot. Usually a CAPTCHA, a login wall, a button the agent will not press, or a site that redirects elsewhere (add trusted hosts to `agent.allowed_domains`) |
-| An application shows `unconfirmed` | Submit was clicked but no confirmation appeared. Check the site by hand; the bot will not retry it |
+| An application shows `unconfirmed` | Submit was clicked but no confirmation appeared. LinkedIn and Handshake postings are looked at again by the bot (`python reverify.py status` says when); for any other site check by hand. The bot will not send it again |
 | Firefox profile locked | Close any Firefox using `.browser_profile`; the launcher normally clears stale locks |
 | A dashboard says "config edited since the daemon started" | You changed `config.yaml` or `config.local.yaml` after the daemon loaded it, so it still runs the old settings. Restart: `setup.bat -StopAll`, then `setup.bat -All -Background` |
 | A dashboard says a model "is not answering" | That model failed twice in a row (Ollama restarting, out of memory, swapped out). It is asked again after the cool-down shown, and its jobs use the main model meanwhile. If it keeps happening, check `ollama ps` and the memory the model needs |

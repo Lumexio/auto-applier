@@ -105,6 +105,16 @@ CREATE TABLE IF NOT EXISTS applications (
 CREATE INDEX IF NOT EXISTS idx_apps_status   ON applications(status);
 CREATE INDEX IF NOT EXISTS idx_apps_started  ON applications(started_at DESC);
 
+-- Later looks at applications that were sent but never confirmed (reverify.py): what the posting showed each time
+CREATE TABLE IF NOT EXISTS reverify_checks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id      TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    checked_at  TEXT NOT NULL,
+    result      TEXT NOT NULL CHECK (result IN ('applied','not_seen','signed_out','blocked','error')),
+    note        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_reverify_job ON reverify_checks(job_id, checked_at DESC);
+
 -- Rate events: sliding window tracking
 CREATE TABLE IF NOT EXISTS rate_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

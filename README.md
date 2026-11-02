@@ -9,7 +9,7 @@ by [Ollama](https://ollama.com), and everything that matters for safety is decid
 
 > **Status:** MVP. The whole loop works end to end: find, filter, check fit, answer, fill in, submit, verify, and
 > hand you whatever needs a person. The pipeline, the answer engine, the agent and the safety rails are covered by
-> 478 automated tests, but a brand-new install has no application history, so **every kind of site starts on
+> 490 automated tests, but a brand-new install has no application history, so **every kind of site starts on
 > probation** (filled in and reviewed, not submitted) until you approve it. See [What the MVP includes](#what-the-mvp-includes)
 > for exactly what is in and what is not, and the [Safety model](#safety-model).
 > Setup instructions are in **[SETUP.md](SETUP.md)**.
@@ -75,7 +75,7 @@ The loop below is built, tested and run by the daemon today. Each row points at 
 | **Resume per job** | If you keep `resume-frontend.pdf` beside `resume-base.pdf`, the version that fits the job title is attached; anything unclear gets your default. | [Your source of truth](#your-source-of-truth) |
 | **Application engines** | Dedicated handlers for Greenhouse, Lever, Workday, LinkedIn Easy Apply and Handshake Quick Apply. For every other site an observe, decide, act, verify agent, which also takes over when a handler finds nothing it knows. A trace with a screenshot per step, and a failure picture when something goes wrong. | [Handling any site](#handling-any-site-the-application-agent) |
 | **Several local models** | Each job (fit, form questions, essays, verification, buttons) can go to the installed model that suits it. A missing or failing model falls back to the main one, and a model that keeps failing is left alone for a while. | [Several local models](#several-local-models-optional) |
-| **Safety rails** | Probation per kind of site, dry run that always wins, a daily cap and per-site limits, duplicate protection, submission only on page evidence, crash recovery and an audit trail. | [Safety and reliability](#safety-and-reliability) |
+| **Safety rails** | Probation per kind of site, dry run that always wins, a daily cap and per-site limits, duplicate protection, submission only on page evidence, a second look at applications that were never confirmed, crash recovery and an audit trail. | [Safety and reliability](#safety-and-reliability) |
 | **Dashboards** | A terminal dashboard, a web page for everything that needs you (answer, decide, trust a site, finish by hand), a one-screen pending list, and a desk that tiles them with the daemon log. Both dashboards warn when a model has been stopped or when you edited the config after the daemon loaded it. | [Interfaces](#interfaces) |
 | **Control** | Commands for the daemon, answers, site trust, fit vetoes and your source of truth; a local REST API; an optional Langflow pipeline. | [Everyday commands](#everyday-commands) |
 | **Running it** | `setup.bat -All` starts everything and opens it; `-All -Background` starts it silently; `-EnableDesk` does it at every Windows login. Your settings live in `config.local.yaml`, so updating the project never touches them. | [Quick start](#quick-start) |
@@ -89,12 +89,12 @@ The loop below is built, tested and run by the daemon today. Each row points at 
 | **Grounded** | Nothing is guessed. Every answer comes from a source you own, and the application records which one (fact sheet, saved answer, computed from a dated resume, or the file and line a draft was quoted from). |
 | **The model never decides alone** | It chooses only among options code already judged safe, a veto needs a quote that exists in the posting, a button choice must survive several menu orders, and code, not the model, classifies buttons and decides whether an application went through. |
 | **Fails safe** | Unknown means parked, never guessed. A site starts on probation, a dry run beats every other setting, a model outage skips a job for now without using up an attempt, and an application that was clicked but not confirmed is never retried. |
-| **Never twice** | Duplicates are caught across cycles and restarts; `unconfirmed` stays unconfirmed until you decide. |
+| **Never twice** | Duplicates are caught across cycles and restarts; `unconfirmed` is never sent again. LinkedIn and Handshake are asked a second time whether you applied; elsewhere it stays until you decide. |
 | **Auditable** | A folder per job (screenshots, answers with sources, fit verdict, agent trace), a SQLite history of runs, attempts and events, and a log line with the reason for every drop. |
 | **Unattended** | Single-instance lock, graceful shutdown, interrupted work parked for review, an Ollama wait at login, circuit breaker for failing models, and a status file the dashboards read to tell you when it needs a restart. |
 | **Modest hardware** | Works with one 7B model on 8 GB of VRAM (about 3 seconds per short call) or on a CPU, inside Ollama's default 2048-token window. |
 | **Yours to configure** | Defaults in `config.yaml`, your own changes in `config.local.yaml`; per-site, per-model, per-filter switches; MIT licensed. |
-| **Tested** | 478 tests, including real browsers driven against a fake application server. They need neither Ollama nor an internet connection. |
+| **Tested** | 490 tests, including real browsers driven against a fake application server. They need neither Ollama nor an internet connection. |
 | **Platform** | Windows 11 and Python 3.14. The Python core is portable; the launcher, desk and login entry are Windows-only. |
 
 ### Not in the MVP yet
@@ -102,7 +102,6 @@ The loop below is built, tested and run by the daemon today. Each row points at 
 | Left out | Why, and what to do meanwhile |
 |---|---|
 | Recruiter outreach | Built but **off** (`outreach.enabled: false`). A draft-and-approve queue, so that nothing is ever sent without your OK, comes first. |
-| Re-checking `unconfirmed` applications | They are listed for you to check by hand (web interface, tab *Not confirmed*). Nothing looks them up automatically. |
 | CAPTCHAs, new accounts, email codes | Never, by design: those jobs are skipped or parked for you. |
 | Writing your resume or cover letters | The cover letter is a template in `profile.json`. |
 | A launcher outside Windows | Run `python daemon.py` and the commands in [Everyday commands](#everyday-commands) directly. |
@@ -193,6 +192,10 @@ The loop below is built, tested and run by the daemon today. Each row points at 
 - **Dry run is authoritative**: in dry-run mode nothing is ever submitted, whatever else is configured.
 - **Duplicate protection**: a job is never applied to twice. An application that was clicked but not confirmed is
   recorded as `unconfirmed` and is **never** retried automatically.
+- **A second look at `unconfirmed` applications**: LinkedIn and Handshake remember what you applied to, so after each cycle
+  the bot opens the oldest ones and, when the posting now says you applied ("Applied 2 days ago", "See application
+  status"), records them as `submitted`. It only reads the page (no click, no form, no CAPTCHA), believes nothing from a
+  sign-in page or another posting, looks a few times a day apart and then leaves it to you. See `python reverify.py status`.
 - **Rate limits**: a daily cap (default 25), a per-domain hourly cap and randomised delays.
 - **Verification**: "submitted" requires evidence from the page (a confirmation message or URL), not just a click.
 - **Crash-safe**: single-instance lock, graceful shutdown on Ctrl+C / system shutdown, interrupted applications
@@ -292,6 +295,7 @@ Then run it for real: `setup.bat -All` starts everything and opens the dashboard
 | `python answers.py set "<question>" "<answer>" --requeue` | Answer once for all future applications |
 | `python answers.py approve "<question>" [--text "..."] [--all-verified] --requeue` | Accept the draft the bot wrote from your resumes (or your own wording) |
 | `python answers.py facts-init` | Write a starter `facts.yaml` from your profile (never overwrites) |
+| `python reverify.py status` / `run` | Which `unconfirmed` applications are looked at again and what the last look found; `run` looks now (daemon stopped) |
 | `python sites.py list` / `approve <site>` / `revoke <site>` | Manage which sites may be submitted to |
 | `python fit_review.py list` / `show` / `approve <job>` / `reject <job>` | See postings the models vetoed or disagreed about, and overrule them |
 | `python source.py init` / `sync` / `show` / `check` / `derive` | Create `me/`, copy your resumes into it, see the years, degrees and employer counts the bot computes from them and why, find contradictions, recompute now |
@@ -318,6 +322,7 @@ Then run it for real: `setup.bat -All` starts everything and opens the dashboard
 | `form_questions.py`, `answerer.py`, `facts.py`, `answers.py` | Reading form fields and answering from your facts |
 | `evidence.py` | Answers drafted from your own resumes and notes: quoted, checked in code, confirmed by a second model call |
 | `resume_pick.py` | Which resume version goes with which job |
+| `reverify.py` | The second look at applications that were sent but never confirmed |
 | `llm_client.py` | The local-model client: roles, fallbacks, the circuit breaker for failing models |
 | `state.py`, `schema.sql`, `sites.py` | SQLite state, migrations, site trust (probation) |
 | `fit.py`, `fit_review.py` | Model fit scoring (facts check, second opinion) and the command to overrule it |

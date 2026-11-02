@@ -609,6 +609,49 @@ class StateStore:
         self.conn.commit()
         return cur.rowcount > 0
 
+    # ---- Looking again at unconfirmed applications (reverify.py) -----------------
+
+    def unconfirmed_with_checks(self) -> list[dict[str, Any]]:
+        """Every unconfirmed application with its posting and how it has been re-checked so far, oldest first.
+
+        ``misses`` counts the looks that found the posting but no sign of an application; looks that could not see the posting
+        (signed out, a CAPTCHA, an error) are not held against it and do not delay the next one (``last_look``)."""
+        cur = self.conn.execute(
+            """
+            SELECT j.id AS job_id, j.title, j.company, j.apply_url, j.source, a.ats, a.started_at, a.error_message,
+                   (SELECT COUNT(*) FROM reverify_checks c WHERE c.job_id = j.id AND c.result = 'not_seen') AS misses,
+                   (SELECT MAX(c.checked_at) FROM reverify_checks c WHERE c.job_id = j.id AND c.result IN ('not_seen','error')) AS last_look,
+                   (SELECT c.result || ': ' || COALESCE(c.note, '') FROM reverify_checks c WHERE c.job_id = j.id ORDER BY c.id DESC LIMIT 1) AS last_result
+              FROM applications a JOIN jobs j ON j.id = a.job_id
+             WHERE a.status = 'unconfirmed'
+             ORDER BY a.started_at, j.id
+            """
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+    def record_reverify_check(self, job_id: str, result: str, note: str = "") -> None:
+        self.conn.execute(
+            "INSERT INTO reverify_checks(job_id, checked_at, result, note) VALUES (?, ?, ?, ?)", (job_id, utc_now(), result, note[:300])
+        )
+        self.conn.commit()
+
+    def confirm_unconfirmed(self, job_id: str, evidence: str) -> bool:
+        """A later look at the posting shows it was applied to: the application is ``submitted`` after all.
+
+        Only an ``unconfirmed`` row changes (a parked, failed or skipped one stays what it is), and nothing about the site's trust does:
+        a confirmation seen after the fact says the application went through, not that the next one on that site can be left unwatched."""
+        now = utc_now()
+        cur = self.conn.execute(
+            """
+            UPDATE applications
+               SET status = 'submitted', submitted_at = COALESCE(submitted_at, started_at, ?), finished_at = ?, error_message = ?
+             WHERE job_id = ? AND status = 'unconfirmed'
+            """,
+            (now, now, ("confirmed on a later look: " + evidence)[:300], job_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
     # ---- Site trust & probation -----------------------------------------------
 
     def site_is_trusted(self, site_key: str, clean_needed: int = 3) -> bool:

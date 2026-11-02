@@ -19,6 +19,8 @@ Pages (all under http://127.0.0.1:<port>):
   /li/job/1          a LinkedIn-like job page whose Apply button opens the employer site in a new tab
   /li/job/nobutton|closed|nothing    LinkedIn-like pages the LinkedIn script finds no apply button on: a link it has no selector for,
                      a closed posting, and a page with nothing to click
+  /li/job/applied|lookalike|walled|elsewhere    the same posting seen again after an unconfirmed application: one that says you applied, one that only
+                     has look-alike words, one that redirects to a sign-in page (/uas/login), one that redirects to a different posting
   /chain/N, /loop    flows that never finish
 """
 
@@ -198,9 +200,19 @@ class FakeATS:
             "/li/job/closed": lambda: layout("Senior Backend Engineer | LinkedIn", (
                 "<h1>Senior Backend Engineer</h1><p>Acme</p><p>No longer accepting applications</p>")),
             "/li/job/nothing": lambda: layout("Senior Backend Engineer | LinkedIn", "<h1>Senior Backend Engineer</h1><p>Acme</p>"),
+            "/li/job/applied": lambda: layout("Senior Backend Engineer | LinkedIn", (
+                "<h1>Senior Backend Engineer</h1><p>Acme</p><p>Applied 2 days ago</p><a href=\"/apply/1\">See application status</a>")),
+            "/li/job/lookalike": lambda: layout("Senior Backend Engineer | LinkedIn", (
+                "<nav><a href=\"/me/jobs\">Applied jobs</a></nav><h1>Senior Backend Engineer</h1><p>Applied Materials partner</p>"
+                "<p>Once your application submitted is reviewed you will hear from us. Applicants who applied earlier are considered first.</p>")),
+            "/uas/login": lambda: layout("Sign in | LinkedIn", "<h1>Sign in</h1><form action=\"/uas/login-submit\" method=\"post\"><input name=\"session_key\"></form>"),
         }.get(path)
         if page:
             return 200, page(), None
+        if path == "/li/job/walled":                           # a signed-out browser is sent to the sign-in page
+            return 302, "", "/uas/login"
+        if path == "/li/job/elsewhere":                        # a posting that now redirects to a different one
+            return 302, "", "/li/job/applied"
         if path.startswith("/jobs/login/"):                    # more sign-in walls: one per job, so a run of them can be told apart
             return self.get("/jobs/login")
         if path.startswith("/chain/"):
