@@ -356,6 +356,7 @@ answers:
 
 agent:
   enabled: true                 # false: sites without a dedicated handler are skipped
+  takeover: true                # a handler that finds nothing it knows how to do (LinkedIn "no apply button") hands the page to the agent
   max_steps: 30
   max_seconds: 360
   consensus: 2

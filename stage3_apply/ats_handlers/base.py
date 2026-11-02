@@ -205,33 +205,38 @@ class BaseHandler(abc.ABC):
             raise CaptchaEncountered(f"{self.name}: CAPTCHA {where}" + (f" ({seen})" if seen else ""))
 
     def prepare(self, profile: dict[str, Any], job: dict[str, Any], *, checkpoint_callback=None) -> PreparedForm:
-        if hasattr(self.session, "requires_login") and self.session.requires_login():
-            raise LoginRequired(f"{self.name}: Login required")
-
         self._job = job
         self._navigate(job["apply_url"])
-        # Only now: before the navigation the tab still shows the PREVIOUS application, whose page (and any CAPTCHA widget on
-        # it) says nothing about this one. Looking there skipped every job after the first one on a site.
+        # Only now: before the navigation the tab still shows the PREVIOUS application, whose page (and any CAPTCHA widget or sign-in
+        # button on it) says nothing about this one. Looking there skipped every job after the first one on a site, and once one page
+        # showed a sign-in button it skipped every later job too, whatever site it was on.
+        if hasattr(self.session, "requires_login") and self.session.requires_login():
+            raise LoginRequired(f"{self.name}: Login required")
         self._raise_if_captcha("on the application page")
         self._precheck_duplicate()
         if self.before_fill:
             self.before_fill(self.session, job)
 
         steps: list[Step] = []
-        for step in self.iter_steps(profile, job):
-            try:
-                self.execute_step(step)
-                step.status = StepStatus.DONE
-                if checkpoint_callback:
-                    checkpoint_callback(step.name)
-            except (CaptchaEncountered, LoginRequired):
-                step.status = StepStatus.BLOCKED
+        try:
+            for step in self.iter_steps(profile, job):
+                try:
+                    self.execute_step(step)
+                    step.status = StepStatus.DONE
+                    if checkpoint_callback:
+                        checkpoint_callback(step.name)
+                except (CaptchaEncountered, LoginRequired):
+                    step.status = StepStatus.BLOCKED
+                    raise
+                except UnsupportedForm as e:
+                    step.status = StepStatus.FAILED
+                    step.error = str(e)
+                    raise
+                steps.append(step)
+        except UnsupportedForm as gap:
+            if not self._may_take_over():
                 raise
-            except UnsupportedForm as e:
-                step.status = StepStatus.FAILED
-                step.error = str(e)
-                raise
-            steps.append(step)
+            return self._take_over(profile, job, gap)
 
         self._solve_questions()          # final sweep: single-page forms and review pages
 
@@ -244,7 +249,35 @@ class BaseHandler(abc.ABC):
             ats=self.name,
         )
 
+    def _any_present(self, selectors: list[str] | tuple[str, ...], wait_s: float = 8) -> bool:
+        """Whether any of ``selectors`` is on the page: look at once, then wait once for any of them to appear. (Waiting for each in
+        turn cost 5 s a selector, so a page with no apply button took 20 s to say so.)"""
+        has = getattr(self.session, "has", None)
+        if not callable(has):
+            return False
+        return any(has(sel) for sel in selectors) or has(", ".join(selectors), wait_timeout_s=wait_s)
+
+    def _may_take_over(self) -> bool:
+        """The application agent may carry on from the page this handler stopped at: it is on, and the session can show it the page."""
+        cfg = self.agent_cfg or {}
+        return bool(cfg.get("enabled", True) and cfg.get("takeover", True)) and hasattr(self.session, "click_action")
+
+    def _take_over(self, profile: dict[str, Any], job: dict[str, Any], gap: UnsupportedForm) -> PreparedForm:
+        """The script found nothing it knows how to do (no apply button, a step it cannot read). The agent reads the page it is on
+        and either carries on or says what the page is (closed, already applied, signed out, a CAPTCHA, a question only the user can
+        answer), which is the part a script cannot tell. Raises what any handler raises."""
+        print(f"[Stage 3] {gap}. The application agent takes over from this page.")
+        delegate = self.spawn_agent()
+        try:
+            form = delegate.run_from_current_page(profile, job)
+        except UnsupportedForm as stuck:
+            raise UnsupportedForm(f"{gap}; {stuck}") from stuck
+        self._delegate = delegate
+        return form
+
     def submit(self) -> SubmissionResult:
+        if self._delegate is not None:                          # the agent carried on from where the script stopped
+            return self._delegate.submit()
         self._raise_if_captcha("at the submit step")
         baseline = self._current_url()
         self._click_submit()

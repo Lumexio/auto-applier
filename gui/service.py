@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import fit_review
-from form_questions import normalize_key
+from form_questions import WHOLE_LIST_MAX, normalize_key
 from sites import DEFAULT_PROBATION
 from state import StateStore
 from tui import data
@@ -25,8 +25,9 @@ from tui import data
 MAX_ANSWER_CHARS = 4000
 SHOWN_STEPS = 80
 SHOWN_DESCRIPTION = 3500
-# The only files of a job's folder the browser may ask for: the form's picture and the agent's per-step pictures.
-_FILE_NAME = re.compile(r"^(form_snapshot\.png|trace/step_[0-9A-Za-z_-]{1,40}\.png)\Z")        # \Z: "$" would also accept a trailing newline
+# The only files of a job's folder the browser may ask for: the form's picture, the picture taken when it went wrong, and the
+# agent's per-step pictures.
+_FILE_NAME = re.compile(r"^(form_snapshot\.png|failure\.png|trace/step_[0-9A-Za-z_-]{1,40}\.png)\Z")        # \Z: "$" would also accept a trailing newline
 
 
 class ActionError(Exception):
@@ -280,13 +281,23 @@ class Desk:
             raise ActionError("No such job.")
         if job:
             job = {**job, "apply_url": safe_url(job.get("apply_url"))}
-        shots = [name for name in (["form_snapshot.png"] if (folder / "form_snapshot.png").is_file() else [])]
+        shots = [name for name in ("failure.png", "form_snapshot.png") if (folder / name).is_file()]
         shots += sorted(f"trace/{Path(p).name}" for p in (detail.get("shots") or []))
         return {
             "job_id": job_id, "app": app, "job": job, "fit": detail.get("fit"), "probation": detail.get("probation"),
             "answers": detail.get("answers") or [], "steps": (detail.get("steps") or [])[-SHOWN_STEPS:],
             "shots": [n for n in shots if _FILE_NAME.match(n)], "description": description[:SHOWN_DESCRIPTION],
+            "failure": self._failure(folder),
         }
+
+    @staticmethod
+    def _failure(folder: Path) -> dict[str, str] | None:
+        """What the page showed when the last attempt went wrong (written by stage 3), as short plain strings."""
+        saved = _read_json(folder / "failure.json")
+        if not isinstance(saved, dict):
+            return None
+        return {key: _clip(saved.get(key), limit) for key, limit in
+                (("kind", 20), ("error", 300), ("url", 300), ("page_type", 30), ("title", 120), ("text", 1200), ("saved_at", 30))}
 
     def file(self, job_id: str, name: str) -> Path | None:
         """The picture ``name`` of a job's folder, or None. Only the two kinds of file in ``_FILE_NAME``, only inside the job's folder."""
@@ -320,9 +331,10 @@ class Desk:
 
     @staticmethod
     def _as_option(pending: dict[str, Any], text: str) -> str:
-        """For a question with a fixed list of choices, the answer is the form's own spelling of one of them (a combobox's list is not known)."""
+        """For a question with a fixed list of choices, the answer is the form's own spelling of one of them. A dropdown's list counts as
+        fixed when it is short enough to be the whole list (a long one is probably only what a search shows before you type)."""
         options = [o for o in (pending["options"] or "").split("|") if o]
-        if not options or pending["kind"] == "combobox":
+        if not options or (pending["kind"] == "combobox" and len(options) > WHOLE_LIST_MAX):
             return text
         match = next((o for o in options if o.casefold() == text.casefold()), None)
         if match is None:

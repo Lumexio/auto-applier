@@ -254,6 +254,8 @@ function needsTab() {
   return out;
 }
 
+const WHOLE_LIST_MAX = 60;          // as in form_questions.py: a dropdown this short listed all its choices
+
 function questionCard(x) {
   const id = x.key + "\u0001" + x.scope;
   if (!(id in state.drafts)) state.drafts[id] = x.proposal || "";
@@ -274,7 +276,7 @@ function questionCard(x) {
       x.scope ? h("span", { class: "chip" }, "applies to " + x.scope + " only") : null));
     if (x.proposal_basis) kids.push(h("details", {}, h("summary", {}, "Where it comes from"), h("pre", {}, x.proposal_basis)));
   }
-  if (x.options.length && x.kind !== "combobox") {
+  if (x.options.length && (x.kind !== "combobox" || x.options.length <= WHOLE_LIST_MAX)) {
     const opts = h("div", { class: "options", role: "group", "aria-label": "Options the form offers" });
     x.options.forEach((o) => {
       const b = h("button", { class: "btn", type: "button", "aria-pressed": String(area.value.trim().toLowerCase() === o.toLowerCase()) }, o);
@@ -473,6 +475,12 @@ async function openJob(jobId) {
     (d.fit.deal_breakers || []).forEach((x) => kids.push(h("div", { class: "small", style: "color:var(--bad)" }, `Deal-breaker, ${x.issue}: “${x.quote}”`)));
   }
   if (d.probation) kids.push(h("h2", {}, "Probation"), h("p", { class: "small" }, `${d.probation.site}: ${d.probation.clean_runs}/${d.probation.needed} clean runs. Look at the picture below; if it is right, trust the site on the main page.`));
+  if (d.failure) {
+    const f = d.failure;
+    kids.push(h("h2", {}, "What the page showed when it went wrong"),
+      h("p", { class: "small" }, (f.page_type ? "The page reads as: " + f.page_type.replace("_", " ") + ". " : "") + (f.url ? "Address: " + f.url : "")));
+    if (f.text) kids.push(h("details", {}, h("summary", {}, "Text on that page"), h("pre", {}, f.text)));
+  }
   if (d.shots.length) {
     kids.push(h("h2", {}, "Pictures"));
     d.shots.forEach((name) => kids.push(h("div", {}, h("div", { class: "muted small" }, name), h("img", { class: "full", src: fileUrl(jobId, name), alt: name, loading: "lazy" }))));

@@ -22,7 +22,7 @@ from typing import Any, Callable
 
 from evidence import Drafted, NoEvidence, Passage, PassageStore, draft_answer, grounded, norm
 from facts import flatten, get_path, merged_view, render_lines
-from form_questions import Question, match_option, normalize_key, parse_questions
+from form_questions import WHOLE_LIST_MAX, Question, clean_label, match_option, normalize_key, parse_questions
 from llm_client import LLMError, chat_json, context_budget, estimate_tokens, for_task
 from stage2_filter.relevance import skill_in
 
@@ -139,6 +139,29 @@ def _number_text(value: Any) -> str:
     return str(int(n)) if n == int(n) else str(n)
 
 
+# At most this many dropdowns are opened on one page to read their choices.
+COMBOBOXES_OPENED_MAX = 8
+
+
+def read_combobox_options(session: Any, questions: list[Question]) -> None:
+    """A dropdown that builds its list when it opens has no options in the page's markup. Open the required, still-empty ones and
+    read what they offer, so an answer can be matched to a choice (and the person can be shown the choices when it cannot)."""
+    opener = getattr(session, "combobox_options", None)
+    if not callable(opener):
+        return
+    opened = 0
+    for q in questions:
+        if q.kind != "combobox" or q.options or q.value or not q.required:
+            continue
+        if opened >= COMBOBOXES_OPENED_MAX:
+            break
+        opened += 1
+        try:
+            q.options = [clean_label(str(o)) for o in opener(q) if str(o).strip()]
+        except Exception:
+            q.options = []                                 # it would not open: it is filled by typing, as before
+
+
 def deliver(q: Question, value: Any, source: str, basis: str) -> Answer | Blocked:
     """Shape ``value`` to what this control accepts, or explain why it cannot be expressed."""
     if q.kind in ("select", "radio"):
@@ -146,6 +169,14 @@ def deliver(q: Question, value: Any, source: str, basis: str) -> Answer | Blocke
         if idx is None:
             return Blocked(f"none of the options ({', '.join(q.options[:6])}) matches '{value}'")
         return Answer(q.id, q.options[idx], source, basis)
+
+    if q.kind == "combobox" and q.options:                  # the dropdown's choices were read when it was opened (see QuestionSolver)
+        idx = match_option(q.options, value)
+        if idx is not None:
+            return Answer(q.id, q.options[idx], source, basis)
+        if len(q.options) <= WHOLE_LIST_MAX:                # a short list is the whole list: an answer outside it cannot be chosen
+            return Blocked(f"none of the options ({', '.join(q.options[:6])}) matches '{value}'")
+        # a long list is probably only what a searchable dropdown shows before anything is typed: type the answer and let it search
 
     if q.kind == "checkbox_group":
         wanted = value if isinstance(value, list) else [value]
@@ -685,6 +716,7 @@ class QuestionSolver:
         except Exception as e:                                              # page navigated / script blocked: the submit check will catch real problems
             report.notes.append(f"could not read the form ({type(e).__name__})")
             return report
+        read_combobox_options(session, questions)
 
         ctx = AnswerContext(
             self.profile, self.facts, self.llm_cfg, self.cfg, job or {}, self.bank_get,
@@ -699,7 +731,8 @@ class QuestionSolver:
                 fill(q, answer.value)
             except Exception as e:
                 plan.unanswered.append(q)
-                plan.reasons[q.id] = f"could not fill the field ({type(e).__name__})"
+                what = (str(e).strip().splitlines() or [""])[0][:100]
+                plan.reasons[q.id] = f"could not fill the field ({type(e).__name__}{': ' + what if what else ''})"
                 continue
             report.answered.append({"question": q.label, "answer": answer.value, "source": answer.source, "basis": answer.basis})
 

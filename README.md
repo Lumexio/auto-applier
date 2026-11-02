@@ -112,6 +112,9 @@ This project takes the opposite approach:
 - For everything else (and for "apply on the company site" links from LinkedIn/Handshake) an
   **observe → decide → act → verify** agent takes over. It works in new tabs, iframes and shadow DOM, handles
   multi-step wizards, declines cookie banners, uploads your résumé, and notices when a site rejected a step.
+- The same agent **takes over from a dedicated handler** that finds nothing it knows how to do on a page (LinkedIn or Handshake
+  with no apply button it recognises). It reads the page: a closed posting is recorded as closed, not as a failure; a link the
+  script had no selector for is followed; a sign-in wall or a CAPTCHA is named. `agent.takeover: false` turns this off.
 - Plain rules decide almost every step. The model is asked only about an unusual button (for example
   "Let's go!"), only chooses from a menu of buttons the code already judged safe, and is asked in several menu
   orders; if its answer changes with the order it is guessing and the agent stops instead of acting.

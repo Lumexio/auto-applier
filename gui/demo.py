@@ -112,4 +112,11 @@ def build(dest: Path | None = None) -> Path:
             {"unanswered": {"label": "Anything else?", "reason": "optional"}},
         ]), encoding="utf-8")
         (d / "fit.json").write_text(json.dumps({"verdict": "apply", "score": 0.86, "model": "qwen2.5:7b", "summary": "Python and PostgreSQL match."}), encoding="utf-8")
+
+    d = folder("f2")                                    # what stage 3 keeps when an attempt goes wrong
+    (d / "failure.png").write_bytes(_png(tint=90))
+    (d / "failure.json").write_text(json.dumps({
+        "kind": "failed", "error": "linkedin: no apply button found on job posting; agent: no way forward found on this page",
+        "url": "https://www.linkedin.com/jobs/view/4400000000", "page_type": "job_page", "title": "Software Engineer | Tailspin | LinkedIn",
+        "text": "Software Engineer. Tailspin. Remote. Posted 2 weeks ago. Save. Show match details.", "saved_at": "2026-11-01T12:00:00+00:00"}), encoding="utf-8")
     return root

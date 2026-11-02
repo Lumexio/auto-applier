@@ -188,6 +188,30 @@ def test_the_answer_must_be_one_of_the_options_the_form_offers():
             assert s.get_answer(english["key"]) == "Professional"         # the form's own spelling, whatever was typed
 
 
+def test_a_dropdowns_choices_are_enforced_when_the_list_is_short_and_free_when_it_is_probably_only_a_first_screenful():
+    from form_questions import WHOLE_LIST_MAX
+
+    with project() as desk:
+        short, long = ["Canada", "Mexico", "Spain"], [f"Place {i}" for i in range(WHOLE_LIST_MAX + 1)]
+        with desk.writer() as s:
+            s.add_pending_questions("e1", [{"label": "Country you work in", "kind": "combobox", "options": short, "reason": "x"},
+                                           {"label": "Where do you live", "kind": "combobox", "options": long, "reason": "x"}])
+        country, place = question(desk, "country you work"), question(desk, "where do you live")
+        assert "Canada | Mexico | Spain" in raises(desk.act, "answer", {"key": country["key"], "scope": "", "text": "Atlantis"})
+        desk.act("answer", {"key": country["key"], "scope": "", "text": "mexico"})
+        desk.act("answer", {"key": place["key"], "scope": "", "text": "Somewhere else"})
+        with desk.reader() as s:
+            assert s.get_answer(country["key"]) == "Mexico" and s.get_answer(place["key"]) == "Somewhere else"
+
+
+def test_the_page_uses_the_same_whole_list_limit_as_the_form_reader():
+    from form_questions import WHOLE_LIST_MAX
+
+    page = INDEX.read_text(encoding="utf-8")
+    assert int(re.search(r"const WHOLE_LIST_MAX = (\d+);", page).group(1)) == WHOLE_LIST_MAX
+    assert 'x.kind !== "combobox" || x.options.length <= WHOLE_LIST_MAX' in page, "a short dropdown's choices are offered as buttons"
+
+
 def test_answers_are_checked_before_they_are_saved():
     with project() as desk:
         tracking = question(desk, "tracking")
@@ -331,15 +355,30 @@ def test_job_detail_has_the_picture_the_answers_and_the_posting():
         assert d["shots"] == ["form_snapshot.png"] and d["probation"]["site"] == "ashby" and d["fit"]["score"] == 0.86
         assert [list(a)[0] for a in d["answers"]] == ["answered", "answered", "unanswered"] and "PostgreSQL" in d["description"]
         assert "No such job" in raises(desk.job, "does-not-exist")
+        assert d["failure"] is None
+
+
+def test_what_the_page_showed_when_an_attempt_went_wrong_is_in_the_job_detail_as_plain_text():
+    with project() as desk:
+        d = desk.job("f2")
+        assert d["shots"][0] == "failure.png" and d["failure"]["kind"] == "failed" and d["failure"]["page_type"] == "job_page"
+        assert "agent: no way forward" in d["failure"]["error"] and d["failure"]["url"].startswith("https://www.linkedin.com/")
+        assert desk.file("f2", "failure.png") is not None and desk.file("f3", "failure.png") is None
+        (desk.root / "applications" / "f2" / "failure.json").write_text(json.dumps({"kind": "x" * 99, "text": "t " * 5000, "extra": "<script>"}), encoding="utf-8")
+        long = desk.job("f2")["failure"]
+        assert len(long["kind"]) <= 20 and len(long["text"]) <= 1200 and "extra" not in long                 # bounded, and only the known keys
+        (desk.root / "applications" / "f2" / "failure.json").write_text("[1, 2", encoding="utf-8")
+        assert desk.job("f2")["failure"] is None                                                           # a half-written file is not an error
 
 
 def test_the_picture_name_pattern_itself_refuses_anything_that_could_climb():
     from gui.service import _FILE_NAME
 
-    for ok in ("form_snapshot.png", "trace/step_01.png", "trace/step_12_b.png"):
+    for ok in ("form_snapshot.png", "failure.png", "trace/step_01.png", "trace/step_12_b.png"):
         assert _FILE_NAME.match(ok), ok
     for bad in ("trace/step_/../../p2/form_snapshot.png", "trace/step_../x.png", "trace/step_a/b.png", "trace\\step_01.png", "trace/step_01.png\n",
-                "form_snapshot.png/", "x/form_snapshot.png", "trace/step_" + "a" * 41 + ".png", "form_snapshot.PNG"):
+                "form_snapshot.png/", "x/form_snapshot.png", "trace/step_" + "a" * 41 + ".png", "form_snapshot.PNG",
+                "failure.json", "failure.png\n", "trace/failure.png", "failure.png.exe"):
         assert not _FILE_NAME.match(bad), bad                                   # the folder check is a second line of defence, not the first
 
 

@@ -38,13 +38,7 @@ class LinkedInHandler(BaseHandler):
             "button:has-text('Apply')",
             "a.jobs-apply-button",
         ]
-        has_btn = False
-        for sel in apply_selectors:
-            if hasattr(self.session, "has") and self.session.has(sel, wait_timeout_s=5):
-                has_btn = True
-                break
-
-        if not has_btn:
+        if not self._any_present(apply_selectors):
             raise UnsupportedForm(f"{self.name}: no apply button found on job posting")
 
         is_easy_apply = hasattr(self.session, "has") and (

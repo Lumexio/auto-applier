@@ -315,6 +315,8 @@ def main():
         ("CAPTCHA Detection", "test_p9_captcha"),
         ("Answers From Your Own Sources (evidence ladder)", "test_p10_evidence"),
         ("Web Interface (what needs a person)", "test_p11_gui"),
+        ("Agent Takeover, Failure Evidence and Sign-in Walls", "test_p12_takeover"),
+        ("Page Furniture, Dropdowns and Generic Uploads", "test_p13_widgets"),
         ("Repository Hygiene (public repo)", "test_repo_hygiene"),
         ("Multi-user Readiness (config layers, profile, licence)", "test_p8_multiuser"),
     ):

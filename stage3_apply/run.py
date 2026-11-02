@@ -38,6 +38,13 @@ from agent import DEFAULT_AGENT_CFG
 
 VALID_MODES = ("dry_run", "assisted", "autonomous")
 
+# This many postings in a row on one site that send the browser to a sign-in page: the session expired, so the rest of that site's
+# jobs wait for the next cycle instead of each one being tried (and marked) against a page that cannot work.
+SIGN_IN_WALLS_BEFORE_GIVING_UP = 3
+
+# What a failed attempt leaves in the job's folder; removed when the job is tried again so an old picture never describes a new run.
+FAILURE_FILES = ("failure.png", "failure.json")
+
 
 def resolve_mode(profile: dict[str, Any], stage3_cfg: dict[str, Any]) -> str:
     """Pick the effective run mode, failing safe.
@@ -235,16 +242,70 @@ class PlaywrightSession:
             raise RuntimeError(f"could not set {selector} to {want}")
 
     @staticmethod
+    def _open_combobox(loc: Any) -> None:
+        """Open a dropdown without waiting 30 s on one that cannot be clicked the usual way (covered, or not a plain input)."""
+        try:
+            loc.click(timeout=3000)
+        except Exception:
+            loc.evaluate("el => { el.focus(); el.click(); }")
+
+    @staticmethod
+    def _pick_option(options: Any, value: str) -> bool:
+        """Click the choice that reads ``value``: the exact one, else the only one containing it. Never one of several guesses."""
+        try:
+            texts = options.all_inner_texts()
+        except Exception:
+            return False
+        want = " ".join(value.casefold().split())
+        if not want:
+            return False
+        norm = [" ".join(t.casefold().split()) for t in texts]
+        exact = [i for i, t in enumerate(norm) if t == want]
+        partial = [i for i, t in enumerate(norm) if want in t]
+        hit = exact[0] if exact else (partial[0] if len(partial) == 1 else None)
+        if hit is None:
+            return False
+        options.nth(hit).click(timeout=3000)
+        return True
+
+    @staticmethod
     def _fill_combobox(target: Any, selector: str, value: str) -> None:
         loc = target.locator(selector).first
-        loc.click()
-        loc.fill(value)
+        PlaywrightSession._open_combobox(loc)
+        target.wait_for_timeout(250)
+        options = target.locator('[role="option"]')
+        if PlaywrightSession._pick_option(options, value):          # it opened with every choice in it (and cannot be typed into)
+            return
+        try:
+            loc.fill(value, timeout=3000)                           # a searchable one: type, and its list narrows
+        except Exception:
+            loc.press_sequentially(value, delay=20, timeout=5000)   # not a plain input: key presses
         target.wait_for_timeout(300)
-        option = target.locator('[role="option"]').filter(has_text=value)
-        if option.count() > 0:
-            option.first.click()
-        else:
-            loc.press("Enter")
+        if PlaywrightSession._pick_option(options, value):
+            return
+        if options.count() > 0:
+            raise RuntimeError(f"none of the choices reads {value!r}")  # never press Enter on whichever one happens to be highlighted
+        loc.press("Enter")                                          # a free-text autocomplete: the typed text is the answer
+
+    def combobox_options(self, q: Any, limit: int = 300) -> list[str]:
+        """What a dropdown offers when it is opened (nothing for one that only searches as you type). The field is left as it was."""
+        target = self._frame(getattr(q, "frame", 0))
+        loc = target.locator(f'[data-aa-id="{q.id}"]').first
+        self._open_combobox(loc)
+        target.wait_for_timeout(250)
+        try:
+            texts = target.locator('[role="option"]').all_inner_texts()
+        finally:
+            try:
+                loc.press("Escape", timeout=2000)
+            except Exception:
+                pass
+        seen: list[str] = []
+        for text in texts:
+            text = " ".join(text.split())[:120]
+            if text and text not in seen:
+                seen.append(text)
+        return seen[:limit]
 
     # ---- the whole-page view the application agent works from (see page_state.py) ----
 
@@ -456,6 +517,31 @@ def _hold_for_probation(
         print(f"[Probation] '{site_key}' is now trusted; {released} parked job(s) released and will be queued again.")
 
 
+def _save_failure_evidence(session: Any, app_dir: Path, kind: str, error: BaseException) -> None:
+    """Keep what the page looked like when the application went wrong (failure.png and failure.json), so the failure can be judged
+    without reproducing it: a CAPTCHA that was not one, a "closed" posting that is open, a sign-in wall. Never raises: the failure
+    itself is already being handled."""
+    try:
+        from datetime import datetime, timezone
+
+        info: dict[str, Any] = {"kind": kind, "error": str(error)[:500], "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        shot = session.screenshot() if hasattr(session, "screenshot") else b""
+        if shot:
+            (app_dir / FAILURE_FILES[0]).write_bytes(shot)
+        if hasattr(session, "current_url"):
+            info["url"] = session.current_url()
+        try:
+            from page_state import take_snapshot
+
+            snap = take_snapshot(session)
+            info.update(page_type=snap.page_type, title=snap.title[:200], text=snap.text[:1500], errors=snap.errors[:6], captcha=snap.captcha_detail)
+        except Exception:
+            pass                                                # the picture and the address are still worth keeping
+        (app_dir / FAILURE_FILES[1]).write_text(json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _resolve_outcome(session: Any, handler: Any, job: dict[str, Any], res: Any, baseline_url: str, confirm_timeout: int) -> tuple[str, str]:
     """Decide what the submit click achieved: ('submitted' | 'unconfirmed' | 'rejected', evidence).
 
@@ -579,8 +665,9 @@ def stage3_run(
         per_domain_per_hour=profile.get("max_applications_per_domain_per_hour", rate_cfg.get("per_domain_per_hour", 5)),
     )
     limited_domains: set[str] = set()
+    sign_in_walls: dict[str, int] = {}                 # domain -> postings in a row that sent us to a sign-in page this cycle
 
-    llm_cfg = build_llm_cfg(cfg)                       # the `llm` block plus the optional `models:` roles; each component picks its own model from it
+    llm_cfg = build_llm_cfg(cfg)                      # the `llm` block plus the optional `models:` roles; each component picks its own model from it
     answers_cfg = {**DEFAULT_ANSWERS_CFG, **cfg.get("answers", {})}
     fit_cfg = {**DEFAULT_FIT_CFG, **cfg.get("fit", {})}
     confirm_timeout = int(stage3_cfg.get("confirmation_timeout_seconds", 20))
@@ -648,6 +735,8 @@ def stage3_run(
                         limited_domains.add(domain)
                         print(f"[Stage 3] Hourly limit reached for {domain}. Skipping its remaining jobs this cycle.")
                     continue
+                if sign_in_walls.get(extract_domain(url), 0) >= SIGN_IN_WALLS_BEFORE_GIVING_UP:
+                    continue                                    # already reported: this site waits for a fresh sign-in
 
                 handler_cls = pick_handler(url)
                 if handler_cls is AgentHandler and not agent_cfg.get("enabled", True):
@@ -657,6 +746,11 @@ def stage3_run(
 
                 app_dir = Path("applications") / _safe_dirname(job_id)
                 app_dir.mkdir(parents=True, exist_ok=True)
+                for stale in FAILURE_FILES:
+                    try:
+                        (app_dir / stale).unlink(missing_ok=True)
+                    except OSError:
+                        pass
                 if solver:
                     solver.begin_job(app_dir)
                     handler.solver = solver
@@ -679,6 +773,7 @@ def stage3_run(
                         job,
                         checkpoint_callback=(lambda step: tx.checkpoint(step)) if tx else None,
                     )
+                    sign_in_walls.pop(extract_domain(url), None)      # a usable page: the session on this site is fine
 
                     # Save screenshot
                     screenshot_bytes = session.screenshot()
@@ -747,18 +842,30 @@ def stage3_run(
 
                 except CaptchaEncountered as e:
                     print(f"[Stage 3] CAPTCHA detected for {job['title']} @ {job['company']}: {e}. Marking skipped.")
+                    _save_failure_evidence(session, app_dir, "captcha", e)
                     if tx:
                         tx.mark("skipped", ats=handler.name, error=f"CAPTCHA encountered: {e}"[:300])
-                except LoginRequired:
+                except LoginRequired as e:
                     print(f"[Stage 3] Login required for {job['title']} @ {job['company']}. Marking skipped.")
+                    _save_failure_evidence(session, app_dir, "login", e)
+                    domain = extract_domain(url)
+                    sign_in_walls[domain] = walls = sign_in_walls.get(domain, 0) + 1
                     if tx:
                         tx.mark("skipped", ats=handler.name, error="Login required")
+                        tx.refund_attempt()           # the session's fault, not this job's: a signed-out browser must not use up every job's attempts
+                    if walls == SIGN_IN_WALLS_BEFORE_GIVING_UP:
+                        print(f"[Stage 3] {walls} postings in a row on {domain} sent the browser to a sign-in page: the session has probably expired, so "
+                              f"that site's remaining jobs wait for the next cycle. Sign in again in the bot's own browser, for example: "
+                              f"python daemon.py --login https://{domain}/login")
+                        if state:
+                            state.log_event("WARN", "stage3", "signed_out", json.dumps({"site": domain, "postings": walls}), run_id=run_id, job_id=job_id)
                 except DuplicateApplication:
                     print(f"[Stage 3] Duplicate detected for {job['title']} @ {job['company']}.")
                     if tx:
                         tx.mark("duplicate", ats=handler.name)
                 except PostingClosed as e:
                     print(f"[Stage 3] {job['title']} @ {job['company']}: {e}")
+                    _save_failure_evidence(session, app_dir, "closed", e)          # permanent, so keep what it saw: a wrong "closed" loses the job for good
                     if tx:
                         tx.mark("skipped", ats=handler.name, error=str(e)[:300], error_code="closed")   # permanent: the posting is gone
                 except NotAFit as e:
@@ -788,10 +895,11 @@ def stage3_run(
                         state.log_event("INFO", "stage3", "dry_run_needs_answers", json.dumps(e.questions)[:2000], run_id=run_id, job_id=job_id)
                 except Exception as e:
                     print(f"[Stage 3] Error during application: {e}")
+                    # Once the submit button may have been clicked the outcome is unknown, and an
+                    # unknown outcome must block retries (unconfirmed) rather than invite a duplicate.
+                    may_have_submitted = submit_attempted and not isinstance(e, UnsupportedForm)
+                    _save_failure_evidence(session, app_dir, "unconfirmed" if may_have_submitted else "failed", e)
                     if tx:
-                        # Once the submit button may have been clicked the outcome is unknown, and an
-                        # unknown outcome must block retries (unconfirmed) rather than invite a duplicate.
-                        may_have_submitted = submit_attempted and not isinstance(e, UnsupportedForm)
                         tx.mark("unconfirmed" if may_have_submitted else "failed", ats=handler.name, error=str(e))
                 finally:
                     if tx_ctx:

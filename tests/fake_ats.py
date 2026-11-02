@@ -17,6 +17,8 @@ Pages (all under http://127.0.0.1:<port>):
   /apply/single      one-page form (Greenhouse-like)   /apply/refer  one-page form with a silently required field
   /apply/shadow      the form inside an open shadow root
   /li/job/1          a LinkedIn-like job page whose Apply button opens the employer site in a new tab
+  /li/job/nobutton|closed|nothing    LinkedIn-like pages the LinkedIn script finds no apply button on: a link it has no selector for,
+                     a closed posting, and a page with nothing to click
   /chain/N, /loop    flows that never finish
 """
 
@@ -183,9 +185,17 @@ class FakeATS:
             "/li/job/1": lambda: layout("Senior Backend Engineer | LinkedIn", (
                 "<h1>Senior Backend Engineer</h1><p>Acme</p>"
                 "<button class=\"jobs-apply-button\" onclick=\"window.open('/jobs/2')\">Apply</button>")),
+            # What the LinkedIn script has no selector for: its own "no apply button" used to end these as failures.
+            "/li/job/nobutton": lambda: layout("Senior Backend Engineer | LinkedIn", (
+                '<h1>Senior Backend Engineer</h1><p>Acme</p><a href="/apply/1">Start your application</a>')),
+            "/li/job/closed": lambda: layout("Senior Backend Engineer | LinkedIn", (
+                "<h1>Senior Backend Engineer</h1><p>Acme</p><p>No longer accepting applications</p>")),
+            "/li/job/nothing": lambda: layout("Senior Backend Engineer | LinkedIn", "<h1>Senior Backend Engineer</h1><p>Acme</p>"),
         }.get(path)
         if page:
             return 200, page(), None
+        if path.startswith("/jobs/login/"):                    # more sign-in walls: one per job, so a run of them can be told apart
+            return self.get("/jobs/login")
         if path.startswith("/chain/"):
             n = int(path.rsplit("/", 1)[1])
             if n > 12:                                         # long enough to prove a budget works, finite so a broken one fails fast

@@ -151,7 +151,8 @@ stage3:
 # prepared cleanly for this many different jobs (dry runs count), or one application there was confirmed.
 agent:
   enabled: true                  # false: sites without a dedicated handler are skipped instead of explored
-  max_steps: 30                  # pages / clicks one application may take before the agent gives up
+  takeover: true                 # a handler that finds nothing it knows how to do (LinkedIn "no apply button") hands the page to the agent instead of failing
+  max_steps: 30                 # pages / clicks one application may take before the agent gives up
   max_seconds: 360               # wall-clock limit for walking one application
   consensus: 2                   # model votes (in different menu orders) that must agree; 1 = trust a single answer
   allowed_domains: []            # extra sites the agent may follow to (e.g. ["jobs.mycompany-careers.com"]); ATS platforms are always allowed
