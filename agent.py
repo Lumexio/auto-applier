@@ -34,11 +34,35 @@ from sites import ATS_HOSTS, site_fingerprint
 
 DEFAULT_AGENT_CFG: dict[str, Any] = {
     "enabled": True,
+    "takeover": True,           # a dedicated handler that finds nothing it knows how to do hands the page to the agent
     "max_steps": 30,            # pages/actions before giving up
     "max_seconds": 360,         # wall-clock budget for one application
     "consensus": 2,             # model votes (in different menu orders) that must agree; 1 = trust a single answer
     "allowed_domains": [],      # extra sites the agent may follow links to
 }
+
+
+# A file slot that names one of these wants that document, not the résumé.
+_ANOTHER_DOCUMENT = re.compile(
+    r"transcript|portfolio|certificat|diploma|degree|passport|identif|\bid\b|photo|picture|sample|reference|recommend|salary|writing|essay|"
+    r"statement|licen[cs]e|visa|permit|clearance|work authori", re.IGNORECASE)
+
+
+def file_to_attach(slot: Any, slots: list[Any], attachments: dict[str, Any]) -> str | None:
+    """The file for one upload slot of a form: the résumé or cover letter the slot names. A generic slot ("Upload File (PDF, Word or
+    Text)") that is required gets ``attachments.default_path`` if you set one, else the résumé, provided the form has no résumé slot
+    of its own and the slot does not name some other document. Anything else gets nothing, so a required one parks the job for you."""
+    if slot.kind == "resume":
+        return attachments.get("resume_path")
+    if slot.kind == "cover_letter":
+        return attachments.get("cover_letter_path")
+    if not slot.required:
+        return None                                       # an optional slot nobody named is left empty
+    if attachments.get("default_path"):
+        return attachments["default_path"]
+    if any(other.kind == "resume" for other in slots) or _ANOTHER_DOCUMENT.search(f"{slot.label} {slot.name}"):
+        return None
+    return attachments.get("resume_path")
 
 
 class AgentStop(Exception):
@@ -98,6 +122,7 @@ class ApplyAgent:
         self._tried: Counter[tuple[str, str, str]] = Counter()
         self._fills: Counter[str] = Counter()
         self._visits: Counter[str] = Counter()
+        self._answering = 0.0                              # seconds spent drafting answers: a long form must not use up the page-walking budget
         self._after_apply = False
         self._after_click: tuple[frozenset[str], set[str]] | None = None   # (question labels, errors) just before the last step click
         self.allowed: set[str] = {name for _, name in ATS_HOSTS} | {str(d).lower() for d in self.cfg["allowed_domains"]}
@@ -120,7 +145,7 @@ class ApplyAgent:
             self.step += 1
             if self.step > int(self.cfg["max_steps"]):
                 raise AgentStop("budget", f"no way to finish within {self.cfg['max_steps']} steps")
-            if self.clock() - started > float(self.cfg["max_seconds"]):
+            if self.clock() - started - self._answering > float(self.cfg["max_seconds"]):
                 raise AgentStop("budget", f"no way to finish within {self.cfg['max_seconds']} seconds")
 
             snap = take_snapshot(self.session)
@@ -266,22 +291,25 @@ class ApplyAgent:
 
     def _fill(self, snap: PageSnapshot, sig: str) -> None:
         self._fills[sig] += 1
-        self.solve()                                       # raises NeedsHumanInput when a required question has no answer
+        began = self.clock()
+        try:
+            self.solve()                                   # raises NeedsHumanInput when a required question has no answer
+        finally:
+            self._answering += self.clock() - began        # every unknown question can mean a few model calls
         self._upload_files(snap)
         self.history.append("filled in the form")
 
     def _upload_files(self, snap: PageSnapshot) -> None:
         attachments = self.profile.get("attachments") or {}
-        paths = {"resume": attachments.get("resume_path"), "cover_letter": attachments.get("cover_letter_path")}
         for f in snap.files:
             if f.has_file:
                 continue
-            path = paths.get(f.kind)
+            path = file_to_attach(f, snap.files, attachments)
             name = f.label or f.name or f.kind
             if path and Path(path).is_file():
                 try:
                     self.session.upload_file(f, path)
-                    self.history.append(f"attached the {f.kind.replace('_', ' ')}")
+                    self.history.append(f"attached the {f.kind.replace('_', ' ')}" if f.kind != "other" else f"attached a file to '{name}'")
                     continue
                 except Exception as e:
                     if f.required:

@@ -17,6 +17,9 @@ def print_once(snap: data.Snapshot, console: Console | None = None) -> None:
     """The whole dashboard as plain text, once. Needs only `rich`, so it works without Textual."""
     console = console or Console()
     console.print(render.render_header(snap))
+    warnings = render.render_warnings(snap)
+    if warnings.plain:
+        console.print(warnings)
     for title, text in (("Today", render.render_today(snap)), ("Latest cycle", render.render_funnel(snap)), ("Models", render.render_models(snap)),
                         ("Now", render.render_now(snap)), ("Needs you", render.render_needs(snap))):
         console.print(Panel(text, title=title, title_align="left", border_style="blue"))

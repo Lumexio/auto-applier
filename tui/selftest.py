@@ -29,6 +29,10 @@ async def _scenario(root: Path, snapshot_fn: Callable | None, shots: Path | None
         table = app.query_one("#recent", DataTable)
         check("recent applications are listed", table.row_count == len(app.snap.recent) and table.row_count > 0)
         check("the job in progress is found", app.snap.now is not None and app.snap.now.live)
+        top = app.query_one("#top")
+        check("the header grows a second line for the config edited after the daemon started and the model it left alone",
+              app.snap.config_changed == ["stage3"] and [b.model for b in app.snap.breakers] == ["deepseek-coder-v2-lite-local"] and top.size.height >= 3)
+        check("the model that is not answering is marked in the models panel", {r.role: r.breaker is not None for r in app.snap.roles} == {"judge": False, "pilot": False, "heavy": True})
         if shots:
             shots.mkdir(parents=True, exist_ok=True)
             app.save_screenshot(filename="dashboard.svg", path=str(shots))

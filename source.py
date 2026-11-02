@@ -111,6 +111,8 @@ def summarize(data: dict[str, Any]) -> None:
           f"(count: {(data.get('policy') or {}).get('count')}), {len(exp.get('years_by_skill') or {})} technologies with years.")
     for c in data.get("conflicts") or []:
         print(f"  ! versions disagree on a date, the shorter is used: {c}")
+    for n in data.get("notices") or []:
+        print(f"  ! {n}")
     for u in data.get("unread") or []:
         print(f"  ! could not read {u}")
 
@@ -147,8 +149,20 @@ def cmd_show(cfg: dict[str, Any], args: argparse.Namespace) -> int:
     print(f"\nYears by technology (a form gets the rounded number){'' if args.all else f', top {len(shown)} of {len(skills)}; --all for the rest'}:")
     for name, value in shown:
         print(f"  {name:<22} {value:>4}  -> {rf_round(value):>2}   {prov.get(f'experience.years_by_skill.{name}', '')[:96]}")
+    edu = data.get("education") or {}
+    if edu:
+        print("\nEducation (of your highest finished degree; a form gets these words):")
+        for key, value in edu.items():
+            print(f"  {key:<24} {value}")
+    counts = {k: v for k, v in exp.items() if k.startswith("companies_")}
+    if counts:
+        print("\nDifferent employers among the dated jobs:")
+        for key, value in counts.items():
+            print(f"  {key:<46} {value:>2}   {prov.get(f'experience.{key}', '')[:70]}")
     for c in data.get("conflicts") or []:
         print(f"\n! versions disagree on a date: {c}")
+    for n in data.get("notices") or []:
+        print(f"\n! {n}")
     print("\nYour facts.yaml wins over all of this. To override one, set it there, e.g.  experience: {years_by_skill: {Python: 3}}")
     return 0
 
@@ -170,6 +184,9 @@ def cmd_check(cfg: dict[str, Any], _args: argparse.Namespace) -> int:
     for c in data.get("conflicts") or []:
         problems += 1
         print(f"  PROBLEM  two versions disagree on a date, the shorter is used: {c}")
+    for n in data.get("notices") or []:
+        problems += 1
+        print(f"  PROBLEM  {n}")
     summary = (data.get("narrative") or {}).get("summary", "")
     for m in re.finditer(r"(\d+)\s*\+?\s*years", summary):
         claimed = int(m.group(1))

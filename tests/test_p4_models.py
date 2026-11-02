@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import llm_client
 from agent import AgentStop, ApplyAgent
-from answerer import AnswerContext, QuestionSolver, _ask_model, _generate_open_ended
+from answerer import AnswerContext, QuestionSolver, _ask_model
 from fit import FitScorer
 from form_questions import Question
 from llm_client import LLMError, build_llm_cfg, chat_json, context_budget, for_task, probe_roles, role_names
@@ -200,26 +200,26 @@ def test_fit_scoring_uses_the_fit_role_and_does_not_reuse_another_models_cached_
     assert plain.llm_cfg["model"] == "base"                                                        # no routing: as before
 
 
-def test_form_questions_and_essays_can_use_different_roles():
-    cfg = config({"pilot": {"model": "coder"}, "heavy": {"model": "big"}}, {"questions": "pilot", "essay": "heavy"})
-    solver = QuestionSolver(PROFILE, FACTS, build_llm_cfg(cfg), {})
-    assert solver.llm_cfg["model"] == "coder" and solver.essay_cfg["model"] == "big"
+def test_form_questions_essays_and_their_check_can_use_different_roles():
+    cfg = config({"pilot": {"model": "coder"}, "heavy": {"model": "big"}, "judge": {"model": "judge-m"}}, {"questions": "pilot", "essay": "heavy", "verify": "judge"})
+    narrative = {"summary": "Backend engineer who builds reliable APIs."}
+    solver = QuestionSolver(PROFILE, {**FACTS, "narrative": narrative}, build_llm_cfg(cfg), {})
+    assert solver.llm_cfg["model"] == "coder" and solver.essay_cfg["model"] == "big" and solver.verify_cfg["model"] == "judge-m"
 
     seen = []
-    ctx = AnswerContext(PROFILE, {**FACTS, "narrative": {"summary": "Backend engineer."}}, solver.llm_cfg, {}, {"title": "Dev", "company": "Acme"}, None, essay_cfg=solver.essay_cfg)
+    ctx = AnswerContext(PROFILE, {**FACTS, "narrative": narrative}, solver.llm_cfg, {}, {"title": "Dev", "company": "Acme"}, None, essay_cfg=solver.essay_cfg)
     question = Question(1, "text", "Do you know Docker?", ["Yes", "No"], True, "", "text", None)
-    with patch("answerer.chat_json", side_effect=lambda c, *a, **k: seen.append(c["model"]) or {"answers": [], "answer": "I build APIs."}):
+    with patch("answerer.chat_json", side_effect=lambda c, *a, **k: seen.append(c["model"]) or {"answers": []}):
         _ask_model([question], ctx)
-        _generate_open_ended(Question(2, "textarea", "Tell us about yourself", [], True, "", "textarea", None), ctx)
-    assert seen == ["coder", "big"]
-
-    seen.clear()
-    ctx.essay_cfg = {}                                                                          # a context built the old way
-    with patch("answerer.chat_json", side_effect=lambda c, *a, **k: seen.append(c["model"]) or {"answer": "I build APIs."}):
-        _generate_open_ended(Question(2, "textarea", "Tell us about yourself", [], True, "", "textarea", None), ctx)
     assert seen == ["coder"]
 
-    # end to end: the solver reads a real-looking form and the essay is drafted by the essay model
+    def model(c, system, user, **kw):
+        seen.append(c["model"])
+        if "check a drafted" in system:
+            return {"supported": True, "unsupported": []}
+        return {"answer": "I build reliable APIs.", "quotes": ["Backend engineer who builds reliable APIs"]}
+
+    # end to end: the solver reads a real-looking form; the essay model drafts, a different model checks the draft
     class Form:
         def __init__(self):
             self.filled = {}
@@ -232,10 +232,16 @@ def test_form_questions_and_essays_can_use_different_roles():
 
     seen.clear()
     form = Form()
-    solver = QuestionSolver(PROFILE, {**FACTS, "narrative": {"summary": "Backend engineer."}}, build_llm_cfg(cfg), {"open_ended": "generate"})
-    with patch("answerer.chat_json", side_effect=lambda c, *a, **k: seen.append(c["model"]) or {"answer": "I build APIs."}):
+    solver = QuestionSolver(PROFILE, {**FACTS, "narrative": narrative}, build_llm_cfg(cfg), {"open_ended": "generate"})
+    with patch("answerer.chat_json", side_effect=model):
         report = solver.solve(form, {"title": "Dev", "company": "Acme"})
-    assert form.filled == {1: "I build APIs."} and not report.blocking and seen == ["big"]
+    assert form.filled == {1: "I build reliable APIs."} and not report.blocking and seen == ["big", "judge-m"]
+
+    seen.clear()
+    no_roles = QuestionSolver(PROFILE, {**FACTS, "narrative": narrative}, build_llm_cfg(config()), {"open_ended": "generate"})
+    with patch("answerer.chat_json", side_effect=model):
+        assert not no_roles.solve(Form(), {"title": "Dev", "company": "Acme"}).blocking
+    assert seen == ["base", "base"]                                                             # without roles the same model drafts and checks
 
 
 def test_the_agents_votes_come_from_different_models_and_must_still_agree():

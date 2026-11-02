@@ -162,6 +162,19 @@ def clean_label(raw: str) -> str:
     return collapse_repeated_phrase(text)           # LinkedIn renders each label twice (visible + screen-reader copy)
 
 
+# A dropdown that lists this many choices or fewer when opened is taken to list all of them; a longer list is probably only what a
+# searchable dropdown shows before anything is typed.
+WHOLE_LIST_MAX = 60
+
+
+# "Slide 2 of 5", "Step 1 of 3": a carousel's or wizard's position marker. It is a control on the page, not a question to answer.
+_POSITION_MARKER = re.compile(r"(?:slide|step|page|card)\s+\d+\s+(?:of|/)\s+\d+", re.IGNORECASE)
+
+
+def is_position_marker(label: str) -> bool:
+    return bool(_POSITION_MARKER.fullmatch(clean_label(label)))
+
+
 def normalize_key(text: str) -> str:
     """Stable identity of a question across companies: lower-case words only."""
     t = re.sub(r"[^a-z0-9 ]+", " ", clean_label(text).casefold())
@@ -201,6 +214,8 @@ def parse_questions(raw: Iterable[dict[str, Any]] | None) -> list[Question]:
     questions: list[Question] = []
     for item in raw or []:
         label = clean_label(str(item.get("label", "")))
+        if is_position_marker(label):
+            continue
         options = [clean_label(str(o)) for o in item.get("options", []) if str(o).strip()]
         questions.append(
             Question(

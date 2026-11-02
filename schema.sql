@@ -176,6 +176,11 @@ CREATE TABLE IF NOT EXISTS pending_questions (
     options       TEXT,
     reason        TEXT,
     first_seen_at TEXT NOT NULL,
+    proposal          TEXT,                       -- an answer drafted from the user's own sources, waiting for approval (never filled in by itself)
+    proposal_basis    TEXT,                       -- the files and the exact lines it rests on
+    proposal_verified INTEGER NOT NULL DEFAULT 0, -- 1 when a model confirmed every claim against those lines
+    proposal_note     TEXT,                       -- who checked it, or why it is unverified
+    proposal_scope    TEXT NOT NULL DEFAULT '',   -- a company key when the text names the company: approving it applies to that company only
     PRIMARY KEY (job_id, question_key)
 );
 CREATE INDEX IF NOT EXISTS idx_pending_key ON pending_questions(question_key);

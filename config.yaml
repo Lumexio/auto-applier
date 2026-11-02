@@ -40,7 +40,8 @@ llm:
 # job the program asks a model to do. The jobs:
 #   fit        judge a posting against you                (needs reading and judgement)
 #   questions  map a form question to your facts          (strict JSON; abstaining is correct when the facts do not say)
-#   essay      draft a free-text answer (answers.open_ended: generate)
+#   essay      draft an answer from your resumes and notes, quoting them (answers.open_ended: propose | generate)
+#   verify     confirm a drafted answer against the lines it quoted; best given a DIFFERENT model than essay / questions
 #   fit_review a DIFFERENT model's independent second opinion on a deal-breaker veto (fit.second_opinion); never the same model as `fit`
 #   agent      choose between buttons on an unfamiliar page; give a LIST of roles and each vote is cast by the next one,
 #              so the votes must agree across models, not just across menu orders (agent.consensus = number of votes)
@@ -133,6 +134,7 @@ stage3:
   confirmation_timeout_seconds: 20     # extra wait for a confirmation page after the handler's own check
   in_progress_stale_minutes: 10
   max_attempts: 3        # failed / error-skipped postings are retried at most this many times; unconfirmed ones never
+  resume_per_job: true   # attach the resume version that fits the job (resume-frontend.pdf for a frontend title ...); false = always the default
   rate_limit:
     global_per_day: 25
     per_domain_per_hour: 5
@@ -150,7 +152,8 @@ stage3:
 # prepared cleanly for this many different jobs (dry runs count), or one application there was confirmed.
 agent:
   enabled: true                  # false: sites without a dedicated handler are skipped instead of explored
-  max_steps: 30                  # pages / clicks one application may take before the agent gives up
+  takeover: true                 # a handler that finds nothing it knows how to do (LinkedIn "no apply button") hands the page to the agent instead of failing
+  max_steps: 30                 # pages / clicks one application may take before the agent gives up
   max_seconds: 360               # wall-clock limit for walking one application
   consensus: 2                   # model votes (in different menu orders) that must agree; 1 = trust a single answer
   allowed_domains: []            # extra sites the agent may follow to (e.g. ["jobs.mycompany-careers.com"]); ATS platforms are always allowed
@@ -163,8 +166,13 @@ agent:
 answers:
   enabled: true
   accept_consents: true          # tick privacy-policy / terms / "my information is accurate" boxes (never marketing opt-ins)
-  open_ended: "review"           # "review": park essay questions for you | "generate": draft them from facts.yaml `narrative`
+  open_ended: "propose"          # essays: "review" parks them untouched | "propose" drafts one from your resumes/notes (me/) and parks it for your
+                                 # OK (python answers.py pending / approve) | "generate" also fills in a draft that passed every check
   answer_optional: false         # false: leave optional questions the model would have to guess
+  evidence: true                 # a question the fact sheet cannot answer is tried against your resumes and notes: the model must quote them,
+                                 # code checks the quotes and that no link / number / name is invented, a second call confirms it
+  evidence_passages: 6           # how many lines of your sources one question may be shown
+  require_independent_verifier: false   # true: only trust a draft that a DIFFERENT model than its author confirmed (models.tasks.verify)
 
 # Judge each posting against you with the local model, on the real posting text, right before filling anything in.
 fit:

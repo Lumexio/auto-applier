@@ -201,7 +201,7 @@ class AutoApplierApp(App):
     TITLE = "Auto-Applier"
     CSS = """
     Screen { layout: vertical; }
-    #top { height: 1; padding: 0 1; background: $boost; }
+    #top { height: auto; padding: 0 1; background: $boost; }
     #row1 { height: 16; }
     .panel { border: round $primary-darken-1; padding: 0 1; }
     #today, #funnel, #models { width: 1fr; height: 100%; }
@@ -262,6 +262,9 @@ class AutoApplierApp(App):
         self.snap = snap
         top = render.render_header(snap)
         top.append(f"   │   updated {datetime.now().strftime('%H:%M:%S')}", style="dim")
+        warnings = render.render_warnings(snap)
+        if warnings.plain:
+            top.append("\n").append_text(warnings)
         self.query_one("#top", Static).update(top)
         self.query_one("#today", Static).update(render.render_today(snap))
         self.query_one("#funnel", Static).update(render.render_funnel(snap))

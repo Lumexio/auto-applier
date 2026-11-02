@@ -27,8 +27,8 @@ ME = candidate_from(FACTS, PROFILE)
 ON = {"enabled": True}
 
 
-def verdict(location, *, remote=None, description="", cand=ME, **cfg):
-    job = {"title": "Backend Engineer", "company": "Acme", "location": location, "description": description}
+def verdict(location, *, remote=None, description="", cand=ME, title="Backend Engineer", **cfg):
+    job = {"title": title, "company": "Acme", "location": location, "description": description}
     if remote is not None:
         job["remote"] = remote
     return location_verdict(job, cand, {**ON, **cfg})
@@ -135,6 +135,35 @@ def test_the_board_saying_remote_turns_a_bare_city_into_a_remote_job_but_never_b
     assert verdict("Chicago, IL", remote=True) is None                               # the board flags it as remote
     assert verdict("Chicago, IL (Hybrid)", remote=True)                              # but hybrid is hybrid
     assert verdict("Berlin", remote=True)                                            # remote within Germany is still Germany
+
+
+def test_a_work_mode_written_in_the_title_counts_when_the_location_names_none():
+    # the location alone cannot say: "United States" and a bare city might be remote
+    assert verdict("United States") is None and verdict("Mexico City") is None
+    for title in ("Backend Engineer (Hybrid)", "Backend Engineer - Hybrid", "Backend Engineer [On-site]", "Backend Engineer | Onsite", "Backend Engineer (Hybrid - 3 days)",
+                  "Ingeniero Backend (Híbrido)", "Backend Engineer (In-Office)"):
+        why = verdict("United States", title=title)
+        assert why and "on-site" in why and "from the title" in why, title
+        assert verdict("Mexico City", title=title) and "not where you live" in verdict("Mexico City", title=title), title
+        assert verdict("Santiago de Querétaro", title=title) is None, title                    # hybrid where you live is fine
+    movers = candidate_from({**FACTS, "location": {**FACTS["location"], "willing_to_relocate": True}}, PROFILE)
+    assert verdict("United States", title="Backend Engineer (Hybrid)", cand=movers) is None
+    # the board's remote flag never beats a hybrid title, as it never beats a hybrid location
+    assert verdict("Chicago, IL", remote=True, title="Backend Engineer (Hybrid)")
+    # a remote title turns a bare city into a remote job, like the board's flag does
+    assert verdict("Chicago, IL") and verdict("Chicago, IL", title="Backend Engineer (Remote)") is None and verdict("Chicago, IL", title="Backend Engineer - Remote") is None
+    # but the location's own words come first
+    assert verdict("Remote - US", title="Backend Engineer (Hybrid)") is None
+    assert verdict("Berlin (Hybrid)", title="Backend Engineer (Remote)")
+    assert verdict("Hybrid - Mexico City", title="Backend Engineer (Remote)") and "not where you live" in verdict("Hybrid - Mexico City", title="Backend Engineer (Remote)")
+    # a title that names both, or a technology, says nothing about how the work is done
+    for title in ("Backend Engineer (Hybrid or Remote)", "Backend Engineer (Remote) (Hybrid)", "Hybrid Cloud Engineer", "Backend Engineer (Hybrid Cloud)",
+                  "Remote Sensing Engineer", "Backend Engineer (Remote Sensing)", "Hybrid Backend Engineer", "Hybrid Infrastructure Engineer - Python",
+                  "Backend Engineer - Hybrid work for the payments group during the second quarter"):       # the mode ends the title; a sentence after it is not a mode
+        assert verdict("United States", title=title) is None, title
+    from stage2_filter.location import title_mode
+    assert (title_mode("Engineer (Hybrid)"), title_mode("Engineer - Remote"), title_mode("Engineer"), title_mode(None)) == ("on_site", "remote", "", "")
+    assert title_mode("Engineer (Remote, US)") == "remote" and title_mode("Engineer (Hybrid) - Remote") == ""
 
 
 def test_on_site_in_your_own_country_is_only_kept_where_you_live():

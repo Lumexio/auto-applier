@@ -67,7 +67,7 @@ def overlay_derived(facts: dict[str, Any], derived: dict[str, Any]) -> dict[str,
     """
     if not derived:
         return facts
-    layer = {k: derived[k] for k in ("experience", "narrative") if isinstance(derived.get(k), dict)}
+    layer = {k: derived[k] for k in ("experience", "education", "narrative", "languages") if isinstance(derived.get(k), dict)}
     merged = copy.deepcopy(facts)
     taken: list[str] = []
     _fill(merged, layer, "", taken)
@@ -177,8 +177,8 @@ preferences:
   referral_source: "Job board"
   over_18: null                     # true / false
 
-# Used ONLY when answers.open_ended is "generate" in config.yaml (e.g. "Why do you want this job?").
-# The model may only rephrase what is written here.
+# Drafts for open questions ("Why do you want this job?") may use what is written here as well as your resumes and notes
+# (me/). The model may only rephrase and must quote it; nothing is filled in unless it passes the checks (answers.open_ended).
 narrative:
   summary: null                     # 2-3 sentences about you
   strengths: []                     # short bullet phrases

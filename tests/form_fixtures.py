@@ -68,3 +68,40 @@ cb.addEventListener('input', () => {
   host.appendChild(ul);
 });
 </script></body></html>"""
+
+# Dropdowns whose choices exist only while they are open: one you can type into (it narrows), one you can only click (read-only, like
+# a custom select), and one that lists nothing until you type (a search). Picking sets data-chosen, the one thing a test can trust.
+COMBOBOX_LISTS = """<!doctype html><html><head><style>ul[role=listbox]{border:1px solid #999;list-style:none;padding:0}</style></head><body><form>
+  <label for="c1">In which country do you currently work? *</label>
+  <input id="c1" role="combobox" aria-autocomplete="list" autocomplete="off" type="text" required>
+  <div id="h1"></div>
+  <label for="c2">English Level *</label>
+  <input id="c2" role="combobox" autocomplete="off" type="text" readonly required>
+  <div id="h2"></div>
+  <label for="c3">Search for your city *</label>
+  <input id="c3" role="combobox" aria-autocomplete="list" autocomplete="off" type="text" required>
+  <div id="h3"></div>
+</form>
+<script>
+function widget(id, host, names, narrows, needsTyping) {
+  const el = document.getElementById(id), box = document.getElementById(host);
+  const show = () => {
+    box.innerHTML = '';
+    const q = narrows ? el.value.toLowerCase() : '';
+    if (needsTyping && !q) return;
+    const ul = document.createElement('ul'); ul.setAttribute('role', 'listbox');
+    names.filter(n => n.toLowerCase().includes(q)).forEach(n => {
+      const li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = n;
+      li.addEventListener('click', () => { el.value = n; el.dataset.chosen = n; box.innerHTML = ''; });
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+  };
+  el.addEventListener('click', show); el.addEventListener('focus', show);
+  el.addEventListener('keydown', e => { if (e.key === 'Escape') box.innerHTML = ''; });
+  if (narrows) el.addEventListener('input', show);
+}
+widget('c1', 'h1', ["Canada", "Mexico", "United States", "Spain"], true, false);
+widget('c2', 'h2', ["Native or bilingual", "Professional", "Conversational"], false, false);
+widget('c3', 'h3', ["Monterrey", "Montreal", "Madrid"], true, true);
+</script></body></html>"""

@@ -8,7 +8,7 @@ from typing import Any
 
 from rich.text import Text
 
-from .data import STATUSES, AppRow, Snapshot, VetoRow
+from .data import STATUSES, AppRow, BreakerInfo, Snapshot, VetoRow
 
 STATUS_STYLE = {
     "submitted": "bold #5fd75f", "unconfirmed": "#ffd75f", "needs_review": "#d787ff", "skipped": "dim", "failed": "#ff5f5f",
@@ -90,6 +90,28 @@ def render_header(snap: Snapshot) -> Text:
     return t
 
 
+RESTART_HINT = "restart it: ./setup.bat -StopAll, then ./setup.bat -All -Background"
+
+
+def breaker_note(b: BreakerInfo) -> str:
+    if b.retry_in > 0:
+        return f"not answering ({b.failures} requests in a row), asked again in {fmt_age(b.retry_in)}"
+    return f"the last {b.failures} request{'s' if b.failures != 1 else ''} got no answer"
+
+
+def render_warnings(snap: Snapshot) -> Text:
+    """What to act on or know now: the config was edited after the daemon loaded it, and models the daemon has stopped asking."""
+    t = Text()
+    if snap.config_changed:
+        t.append("⚠ ", style="bold #ffd75f").append("config edited since the daemon started (", style="#ffd75f")
+        t.append(", ".join(snap.config_changed), style="bold #ffd75f").append("): it still runs the old settings; ", style="#ffd75f")
+        t.append(RESTART_HINT, style="dim")
+    for b in (b for b in snap.breakers if b.retry_in > 0):
+        t.append("\n" if t.plain else "").append("⚠ ", style="bold #ff5f5f").append(f"model {b.model} is ", style="#ff5f5f").append(breaker_note(b), style="#ff5f5f")
+        t.append("; its jobs use the base model meanwhile", style="dim")
+    return t
+
+
 def render_today(snap: Snapshot) -> Text:
     t = Text()
     t.append("Submissions, last 24 h  ").append(f"{snap.cap_used}/{snap.cap_limit}\n", style="bold")
@@ -165,9 +187,16 @@ def render_models(snap: Snapshot) -> Text:
         t.append("\nRoles\n", style="bold underline")
         for r in snap.roles:
             t.append("  ● " if r.loaded else "  ○ ", style="#5fd75f" if r.loaded else "dim")
-            t.append(f"{r.role:<7}", style="bold").append(f" {r.model}", style="").append("  " + (", ".join(r.tasks) or "unused") + "\n", style="dim")
+            t.append(f"{r.role:<7}", style="bold").append(f" {r.model}", style="").append("  " + (", ".join(r.tasks) or "unused"), style="dim")
+            if r.breaker:
+                t.append("\n      ⚠ " + breaker_note(r.breaker), style="#ff5f5f" if r.breaker.retry_in > 0 else "#ffd75f")
+            t.append("\n")
     elif snap.base_model:
         t.append(f"\nOne model for every job: {snap.base_model}\n", style="dim")
+    in_roles = {r.model for r in snap.roles}
+    for b in snap.breakers:
+        if b.model not in in_roles:                                  # the base model, or one that no role names any more
+            t.append(f"\n⚠ {b.model}: {breaker_note(b)}\n", style="#ff5f5f" if b.retry_in > 0 else "#ffd75f")
     return t
 
 

@@ -18,7 +18,7 @@ import re
 import threading
 import time
 import urllib.request
-from typing import Any
+from typing import Any, Callable
 
 DEFAULT_ENDPOINT = "http://127.0.0.1:11434/v1"  # Ollama's OpenAI-compatible API
 DEFAULT_MODEL = "qwen2.5:7b"
@@ -103,6 +103,14 @@ def breaker_status(cfg: dict[str, Any]) -> dict[str, float]:
         return {"failures": st["failures"] if st else 0, "open_for": max(0.0, st["open_until"] - _now()) if st else 0.0}
 
 
+def breaker_report() -> list[dict[str, Any]]:
+    """Every model that has failed lately, for the status file: endpoint, model, failures in a row, seconds left in its cool-down (0 = asked again)."""
+    with _breaker_lock:
+        rows = [{"endpoint": key[0], "model": key[1], "failures": st["failures"], "open_for": round(max(0.0, st["open_until"] - _now()), 1)}
+                for key, st in _breakers.items() if st["failures"] > 0]
+    return sorted(rows, key=lambda r: (r["model"], r["endpoint"]))
+
+
 def _breaker_gate(cfg: dict[str, Any]) -> None:
     if not _breaker_limits(cfg)[0]:
         return
@@ -129,6 +137,7 @@ def _breaker_failed(cfg: dict[str, Any]) -> None:
                 note = f"[LLM] model '{_breaker_key(cfg)[1]}' did not answer {st['failures']} requests in a row; leaving it alone for {int(cooldown)}s and retrying after that"
     if note:
         print(note)
+    _breaker_changed()
 
 
 def _breaker_ok(cfg: dict[str, Any]) -> None:
@@ -136,14 +145,31 @@ def _breaker_ok(cfg: dict[str, Any]) -> None:
     if not limit:
         return
     note = ""
+    was_failing = False
     with _breaker_lock:
         st = _breakers.get(_breaker_key(cfg))
         if st:
+            was_failing = st["failures"] > 0
             if st["announced"]:
                 note = f"[LLM] model '{_breaker_key(cfg)[1]}' is answering again"
             st.update(failures=0, open_until=0.0, announced=False)
     if note:
         print(note)
+    if was_failing:
+        _breaker_changed()
+
+
+# The daemon sets this so its status file (daemon_status.py) changes the moment a breaker does, not at the next job boundary.
+breaker_listener: Callable[[], None] | None = None
+
+
+def _breaker_changed() -> None:
+    listener = breaker_listener
+    if listener is not None:
+        try:
+            listener()
+        except Exception:                                   # a status file that cannot be written must never break a model call
+            pass
 
 
 # --------------------------------------------------------------------------- memory

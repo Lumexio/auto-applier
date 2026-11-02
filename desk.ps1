@@ -7,9 +7,9 @@
 #                            bottom the daemon: starts it, then follows its log
 #   ./setup -EnableDesk    open it at every Windows login      (./setup -DisableDesk to stop)
 #
-# The one graphical interface the project has, the Langflow web UI (http://localhost:7860), opens in your default browser as soon
-# as it answers (it needs a minute or two to start). The REST API on port 8000 has no screen, so nothing opens for it.
-# Add -NoGui to leave the browser out.
+# Two web pages open in your default browser as soon as they answer: the desk for what needs you (http://127.0.0.1:8765/, up in
+# seconds: questions to answer, decisions to make, jobs to finish by hand) and the Langflow web UI (http://localhost:7860, a minute
+# or two). The REST API on port 8000 has no screen, so nothing opens for it. Add -NoGui to leave the browser out.
 #
 # The bottom pane starts the services itself, and only once Ollama answers: the daemon checks the models a single time, at
 # start, so one that starts before Ollama is ready runs the whole session without its extra models.
@@ -104,6 +104,8 @@ if ($Pane -eq "Daemon") {
     if (-not $DaemonOnly -and -not $NoGui) {
         # Hidden, and on its own: it waits for Langflow however long that takes (up to $WaitMinutes) and then opens the browser
         Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -ArgumentList @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$Self`"", "-Pane", "Gui", "-WaitMinutes", $WaitMinutes)
+        # The desk page: its server is started with the services below, so it answers within seconds and opens first
+        Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -ArgumentList @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$Self`"", "-Pane", "Gui", "-Url", "http://127.0.0.1:8765/", "-WaitMinutes", 3)
     }
 
     $flags = @{ Background = $true; SkipChecks = $true }

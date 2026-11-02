@@ -85,6 +85,12 @@ This project takes the opposite approach:
   resume-template folder). **Years of experience are computed from the dates next to each job**, a framework implies its language
   (Laravel -> PHP, Vue -> JavaScript), and every number records where it came from. `python source.py show` prints them,
   `python source.py check` looks for contradictions between your versions.
+- **Education and employers come from the same dates**: your highest *finished* degree (one in progress is not it), its school, field and
+  GPA, when your first bachelor's degree ended, and how many different companies you worked for in the last ten years / since that degree.
+  Where your versions disagree (a different field of study, another GPA) nothing is claimed and `check` says so: state it in `facts.yaml`.
+- If you keep several PDF versions of your resume (`resume-frontend.pdf` beside `resume-base.pdf`), the one that fits the job is attached: the title decides
+  ("Frontend Engineer"), the posting text only when it clearly leans one way, and anything unclear ("Full Stack", no PDF for that kind) gets the default.
+  `stage3.resume_per_job: false` turns it off; `attachments.resumes` / `attachments.resume_rules` in `profile.json` list your own versions and words.
 - A technology your resumes never show is never claimed, and the career total is never offered for a question about a specific tool.
   What you write in `facts.yaml` always wins over what is computed.
 - Questions that were parked for a missing fact are re-checked every run: add the fact (or fix a resume) and those jobs are queued again.
@@ -96,13 +102,25 @@ This project takes the opposite approach:
 - If a *required* question cannot be answered, the job is **parked as `needs_review`** and listed by
   `python answers.py pending`. Answer it once (`answers.py set`) and it is used for all future applications.
 - Consent boxes (privacy policy, terms, "my information is accurate") can be ticked automatically; marketing
-  opt-ins never are. Essay/opinion questions are parked for you (or drafted from a `narrative` block if you opt in).
+  opt-ins never are.
+- **When the fact sheet does not say, your own words do.** A question no rule covers ("what do you use to store tracking data?",
+  "tell us about something you built") is tried against the lines of your resumes and notes (`me/`): a local model drafts an
+  answer **quoting** the lines it relied on, code checks that every quote is word for word in your files and that the answer
+  adds no link, number, tool or name they do not contain, and a second model call confirms every claim. A short answer that
+  passes is filled in (the audit trail names the file and the line). An essay is **proposed, not filled in**, unless you set
+  `answers.open_ended: generate`; `python answers.py pending` shows each draft with its sources, and
+  `python answers.py approve "<question>"` accepts it (an answer that names the company is saved for that company only).
+- Some questions are never answered for you, whatever your files say: whether you used AI for the application, citizenship and
+  identity numbers, signatures, dismissals and legal disclosures, security clearances, criminal history.
 
 ### Handling any site: the application agent
 - Dedicated handlers: **Greenhouse, Lever, Workday, LinkedIn Easy Apply, Handshake Quick Apply**.
 - For everything else (and for "apply on the company site" links from LinkedIn/Handshake) an
   **observe → decide → act → verify** agent takes over. It works in new tabs, iframes and shadow DOM, handles
   multi-step wizards, declines cookie banners, uploads your résumé, and notices when a site rejected a step.
+- The same agent **takes over from a dedicated handler** that finds nothing it knows how to do on a page (LinkedIn or Handshake
+  with no apply button it recognises). It reads the page: a closed posting is recorded as closed, not as a failure; a link the
+  script had no selector for is followed; a sign-in wall or a CAPTCHA is named. `agent.takeover: false` turns this off.
 - Plain rules decide almost every step. The model is asked only about an unusual button (for example
   "Let's go!"), only chooses from a menu of buttons the code already judged safe, and is asked in several menu
   orders; if its answer changes with the order it is guessing and the agent stops instead of acting.
@@ -132,6 +150,11 @@ This project takes the opposite approach:
   latest cycle's funnel, which models are loaded), the job being worked on right now with its step-by-step agent flow,
   recent applications you can open to see the fit verdict, answers and every step with who decided it, plus questions
   waiting for you and the trust state of each site. Read-only: it only watches what the daemon writes.
+- **Web interface** (`gui.bat`, http://127.0.0.1:8765/): everything that needs a person on one page. Answer the questions the
+  forms asked (a draft from your own resumes is already in the box, with the lines it rests on), settle fit decisions the models
+  disagreed about, look at the filled-in forms of a site on probation and trust it, and finish by hand the jobs that send you to
+  the company's own site. Every button does what the matching command does; nothing is submitted from the page. Listens on this
+  computer only.
 - **CLI** for the daemon, answers and site trust.
 - **Local REST API** (loopback only, bearer-token protected) for profile, status, scrape/filter/apply.
 - **Langflow** visual pipeline (optional) with ready-made components.
@@ -195,6 +218,8 @@ python sites.py approve greenhouse
 
 Then run it for real, either `python daemon.py` or `setup.bat -All -Background`.
 
+(In PowerShell write `./setup.bat`, `./gui.bat` and `./tui.bat`: PowerShell does not run a program from the current folder by its bare name.)
+
 ## Everyday commands
 
 | Command | What it does |
@@ -209,7 +234,8 @@ Then run it for real, either `python daemon.py` or `setup.bat -All -Background`.
 | `python fit_review.py list` / `show` / `approve <job>` / `reject <job>` | See postings the models vetoed or disagreed about, and overrule them |
 | `python source.py sync` / `show` / `check` | Copy your resumes into `me/`, see the years the bot computes from them and why, find contradictions |
 | `python pending.py [--watch 60]` | One screen of everything waiting for you, with the command or link for each |
-| `setup.bat -Desk` / `-EnableDesk` | Open dashboard + pending list + daemon log in one terminal window, and the Langflow web UI in your browser, now / at every Windows login (`-NoGui` skips the browser) |
+| `gui.bat` | The web interface for what needs you: answer, decide, finish by hand (`--demo` for made-up data, `--port N`) |
+| `setup.bat -Desk` / `-EnableDesk` | Open dashboard + pending list + daemon log in one terminal window, and the web interface and Langflow in your browser, now / at every Windows login (`-NoGui` skips the browser) |
 | `tui.bat` | Live terminal dashboard (`--demo` for made-up data, `--once` to print a text snapshot) |
 | `python api.py --port 8000` | Local REST API |
 | `setup.bat -Status` | Show daemon / API / Langflow state |
@@ -230,6 +256,7 @@ Then run it for real, either `python daemon.py` or `setup.bat -All -Background`.
 | `state.py`, `schema.sql`, `sites.py` | SQLite state, migrations, site trust (probation) |
 | `fit.py`, `fit_review.py` | Model fit scoring (facts check, second opinion) and the command to overrule it |
 | `api.py` | Local REST API |
+| `gui/`, `gui.bat` | The web interface for what needs a person (standard library only: `service.py` is what the buttons do, `server.py` the local HTTP side, `static/index.html` the page) |
 | `tui/`, `tui.bat` | Read-only terminal dashboard (data and rendering use only the standard library and `rich`; the Textual app runs in its own `.venv-tui`) |
 | `profile_gen.py` | Builds `profile.json` from your resume; leaves empty whatever the resume does not state |
 | `config.yaml`, `config_loader.py` | The shared defaults, and the loader that merges your own `config.local.yaml` (never committed) over them |

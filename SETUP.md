@@ -293,7 +293,8 @@ models:
 |---|---|---|
 | `fit` | judges a posting against you | needs reading and judgement |
 | `questions` | maps a form question to your facts | strict JSON; abstaining is the right answer when the facts do not say |
-| `essay` | drafts a free-text answer (`answers.open_ended: generate`) | only used when you turn that on |
+| `essay` | drafts a free-text answer from your resumes and notes (`answers.open_ended: propose` or `generate`) | quotes the lines it used; a draft is checked in code before anyone sees it |
+| `verify` | confirms a drafted answer against the lines it quoted | give it a DIFFERENT model than `essay`/`questions` (for example `verify: heavy`); with `answers.require_independent_verifier: true` a draft is only trusted when it did |
 | `agent` | chooses between buttons on an unfamiliar page | a list of roles: vote *k* is cast by role *k* in menu order *k*, and the votes must still all agree |
 
 A task you do not list uses the `llm` block, so you can adopt this one job at a time.
@@ -347,11 +348,15 @@ fit:
 answers:
   enabled: true
   accept_consents: true         # tick privacy/terms/accuracy boxes (never marketing opt-ins)
-  open_ended: "review"          # "review": park essay questions | "generate": draft from facts.yaml narrative
+  open_ended: "propose"         # essays: "review" parks them untouched | "propose" drafts one from your resumes/notes and parks it for your OK | "generate" fills in a verified draft
   answer_optional: false
+  evidence: true                # a question the fact sheet cannot answer is tried against your resumes and notes (quoted, checked, verified)
+  evidence_passages: 6          # how many lines of your sources one question may be shown
+  require_independent_verifier: false   # true: a draft is only trusted when a different model than its author confirmed it (models.tasks.verify)
 
 agent:
   enabled: true                 # false: sites without a dedicated handler are skipped
+  takeover: true                # a handler that finds nothing it knows how to do (LinkedIn "no apply button") hands the page to the agent
   max_steps: 30
   max_seconds: 360
   consensus: 2
@@ -423,6 +428,10 @@ python -c "import sqlite3; print(sqlite3.connect('state.db').execute('select sta
 
 ### 7.1 Answer anything it was missing
 
+The easiest way is the web interface (section 9, "The web interface"): `gui.bat` opens a page with every waiting question, a
+draft from your own resumes already in the box where there is one, and a button that saves your answer and queues the jobs
+again. The commands below do the same.
+
 `python answers.py pending` lists the *required* questions that stopped applications, most-needed first. Answer one
 and it is reused everywhere:
 
@@ -433,6 +442,18 @@ python answers.py set "Are you willing to relocate?" "No" --requeue
 `--requeue` puts the jobs that were only waiting on that answer back in the queue (only while the posting is still
 listed). Other commands: `answers.py list`, `answers.py forget "<question>"`, `answers.py requeue [JOB_ID]`.
 You can also add the fact to `facts.yaml` and requeue.
+
+Questions your fact sheet cannot answer are tried against your resumes and notes first (see "Answering application
+questions" in the README). When that produces a draft, `pending` shows it under the question, with the files and the exact
+lines it rests on, and whether a model confirmed it:
+
+```powershell
+python answers.py approve "Why do you want to join Acme?" --requeue     # accept the draft (saved for that company only if it names it)
+python answers.py approve "Tell us about yourself" --text "My own wording" --requeue
+python answers.py approve --all-verified --requeue                       # every draft a model confirmed
+```
+
+Nothing a model wrote is filled in unless it passed the checks, and an essay only when `answers.open_ended` is `generate`.
 
 ### 7.2 Approve sites (probation)
 
@@ -505,17 +526,22 @@ Switch the second opinion off with `fit.second_opinion: false`.
 `setup.bat` is the Windows launcher (it runs `setup.ps1`). With no arguments it shows an interactive menu;
 the flags below skip the menu.
 
+> **PowerShell does not run a program from the current folder by its bare name.** In PowerShell write `./setup.bat -All -Background`
+> (and `./gui.bat`, `./tui.bat`); in Command Prompt, and in the Windows Run box, `setup.bat -All -Background` works as written.
+> Every `setup.bat` / `gui.bat` / `tui.bat` command in this guide and in the README is written for Command Prompt.
+
 | Command | What it does |
 |---|---|
-| `setup.bat -All -Background` | Start the daemon, the REST API (port 8000) and Langflow (port 7860) in the background |
+| `setup.bat -All -Background` | Start the daemon, the web interface (port 8765), the REST API (port 8000) and Langflow (port 7860) in the background |
+| `setup.bat -Gui` | Open the web interface for what needs you in your browser (starts it if it is not running) |
 | `setup.bat -Daemon -Background` | Start only the daemon, detached |
 | `setup.bat -Status` | Show what is running |
 | `setup.bat -Logs` | Stream the live daemon log |
-| `setup.bat -StopAll` | Stop the daemon, API and Langflow |
+| `setup.bat -StopAll` | Stop the daemon, web interface, API and Langflow |
 | `setup.bat -StopDaemon` | Stop only the daemon |
 | `setup.bat -DryRun` | One dry-run cycle |
 | `setup.bat -EnableAutoStart` / `-DisableAutoStart` | Start everything at Windows login, hidden (adds or removes a script in your Startup folder) |
-| `setup.bat -Desk` | Open the desk now: dashboard, what is waiting for you, and the daemon log, tiled in one Windows Terminal window; the Langflow web UI opens in your default browser once it answers (`-NoGui` leaves the browser out) |
+| `setup.bat -Desk` | Open the desk now: dashboard, what is waiting for you, and the daemon log, tiled in one Windows Terminal window; the web interface and the Langflow web UI open in your default browser once they answer (`-NoGui` leaves the browser out) |
 | `setup.bat -EnableDesk` / `-DisableDesk` | Open the desk at every Windows login and start the services there (replaces `-EnableAutoStart`; add `-DaemonOnly` to leave out the API, Langflow and the browser, or `-NoGui` to leave out only the browser) |
 | `setup.bat -Login "<url>"` | Open the login browser for a site |
 | `setup.bat -SyncCookies` | Import cookies from your personal Firefox |
@@ -603,6 +629,29 @@ environment too), and `tui.bat --selftest` drives the dashboard headlessly and p
 If colours are missing, your shell has `NO_COLOR` set; unset it. If the dashboard says "daemon stopped" while you
 know it runs, it may be running as another user or in WSL (the process check only sees this Windows session).
 
+### The web interface: answer and decide in your browser
+
+`gui.bat` (or `python -m gui --open`) serves a page at http://127.0.0.1:8765/ and opens it. `setup.bat -All -Background` starts
+it with the other services, `setup.bat -Gui` opens it (starting it if needed), `-StopAll` stops it, and the desk opens it in your
+browser at login unless you pass `-NoGui`. It reads the same files the daemon writes and changes only what you press.
+
+| Tab | What it is for |
+|---|---|
+| **Needs you** | **Questions the forms asked**: type an answer (or pick one of the form's options) and save: it is kept for every future form that asks the same, and the jobs that were waiting on it are tried again. A draft from your resumes and notes is already in the box with the lines it rests on and whether a second model confirmed it; an answer that names the company is saved for that company only. "Skip these jobs" ends them for good instead. **Fit models disagree**: *Apply anyway* queues the posting and no model can veto it; *Skip for good* ends it. **Sites on probation**: the filled-in forms (click a picture to see it whole, with the answers given and the questions left blank); *Trust* applies to the jobs held back and every later one at that kind of site. **Apply yourself** / **Check by hand** / **Other parked jobs**: open the posting, then say *I applied*, *try again* or *skip* |
+| **Not confirmed** | Applications that were sent without a confirmation page (the bot never retries these on its own, so nothing is applied twice). Check, then say it went through, try again, or skip |
+| **Failed** | The bot could not finish them; try again now or give up |
+| **Saved answers** | Everything the bot may say, editable; add one before a form asks, or forget a wrong one |
+| **Sites** | Trust or put back on probation |
+| **Activity** | Latest outcomes, what is being applied to right now, the daemon log |
+
+*I applied* records the posting as submitted by you; *try again* forgets the attempt so the next cycle queues it (only if the
+posting is still listed), and the page asks first when that could apply twice; *skip* is final. None of the buttons submits an
+application or contacts anyone: they record your decision and the daemon acts on it in its next cycle.
+
+The page is meant for you alone. It listens on `127.0.0.1` (this computer) only; every request needs a random token that is
+built into the page when it is served, a request from another website or another host name is refused, and postings are shown
+as plain text, never as markup. If the port is taken, `python -m gui --port 9000`; `gui.bat --demo` shows it on made-up data.
+
 ### Your source of truth: resumes that answer for you
 
 The bot answers only from what you state, never from imagination. Your resumes are the best statement of your experience you
@@ -639,6 +688,17 @@ A computed value is rounded as a person would (4.2 -> 4, 0.9 -> 1) and is record
 evidence; a value you stated is used exactly as written. `source.experience.count: jobs_and_projects` makes your projects count as
 work too. If two resume versions give different dates for the same job, the shorter is used and `check` reports it.
 
+**Education and companies** are worked out the same way, from the Education section and the job dates of every version:
+
+| Fact (under `education:` / `experience:`) | Where it comes from |
+|---|---|
+| `highest_degree`, `school`, `field_of_study` | the highest degree whose dates are over (a master's marked "Present" or ending next year is not counted) |
+| `gpa`, `gpa_scale` (and `gpa_degree`) | the GPA written next to that degree; none is claimed for a degree that states no GPA |
+| `first_degree_graduated`, `first_degree_year` | when your first bachelor's degree ended (only a year written: December is assumed, and the report says so) |
+| `companies_last_10_years`, `companies_since_first_degree`, `companies_since_first_degree_last_10_years` | different employers among the dated jobs that overlap that stretch; a job with no company name stops the count instead of guessing |
+
+This answers "highest level of education", "GPA" (never a high-school or master's GPA, and never on another scale than the one written), "how many companies have you worked for in the past ten years / since you graduated" and "confirm your first degree completed in 2025 or 2026" (a plain yes or no from the year it ended). If two versions give a different field of study, GPA or end month, the value is left out and `python source.py check` names both versions; state the right one in `facts.yaml` (`education: {field_of_study: ...}`).
+
 It refreshes by itself when a resume changes or the month turns ("Present" moves). And every run it re-checks the **parked
 questions**: any that these facts can now answer are resolved and the jobs that were only waiting on them are queued again, so
 fixing a resume or a fact un-parks the backlog without you running anything.
@@ -659,9 +719,10 @@ sent but never confirmed). It is read-only and uses the same data as the dashboa
 right (refreshed every minute) and the daemon on the bottom right. That last pane starts the services if they are not
 running and then follows `daemon.log`. Closing the window does not stop anything.
 
-The Langflow web UI (http://localhost:7860), the one graphical interface the project has, opens in your default browser as soon
-as it answers; it needs a minute or two to start, and the page opens by itself when it is ready. The REST API on port 8000 has
-no screen, so nothing opens for it. `-NoGui` leaves the browser out; `-DaemonOnly` leaves out Langflow and with it the browser.
+Two web pages open in your default browser as soon as they answer: the web interface for what needs you
+(http://127.0.0.1:8765/, up in seconds) and the Langflow web UI (http://localhost:7860, a minute or two to start; its page opens
+by itself when it is ready). The REST API on port 8000 has no screen, so nothing opens for it. `-NoGui` leaves the browser out;
+`-DaemonOnly` leaves out the web interface and Langflow, and with them the browser.
 
 `setup.bat -EnableDesk` does this at every Windows login, so the first thing you see after logging in is what is pending and
 the project running. Things to know:
@@ -713,7 +774,7 @@ into system RAM slows each call dramatically.
 | `daemon.log` | Log of every cycle | Yes |
 | `.browser_profile/` | The bot's browser profile **with logged-in sessions** | **Yes, never share or commit** |
 | `.api_token` | REST API bearer token | Yes |
-| `.daemon.pid`, `.api.pid`, `.langflow.pid` | Process ids for the launcher | No |
+| `.daemon.pid`, `.api.pid`, `.langflow.pid`, `.gui.pid` | Process ids for the launcher | No |
 | `profile.json`, `facts.yaml` | Your personal data | Yes |
 
 If you put the project under version control, ignore all of the above.
