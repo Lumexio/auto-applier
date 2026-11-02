@@ -140,11 +140,20 @@ class LoadedModel:
 
 
 @dataclass
+class BreakerInfo:
+    """A model the daemon has stopped asking (status.json): it did not answer a request."""
+    model: str
+    failures: int            # requests in a row that got no answer
+    retry_in: float          # seconds until it is asked again, as of now (0: the next request is a trial)
+
+
+@dataclass
 class RoleInfo:
     role: str
     model: str
     tasks: list[str]
     loaded: bool
+    breaker: BreakerInfo | None = None
 
 
 @dataclass
@@ -206,6 +215,8 @@ class Snapshot:
     base_model: str = ""
     log: list[str] = field(default_factory=list)
     mode: str = ""
+    breakers: list[BreakerInfo] = field(default_factory=list)            # models the running daemon is leaving alone
+    config_changed: list[str] = field(default_factory=list)              # config sections edited since the running daemon loaded them
 
 
 def _app_row(r: sqlite3.Row) -> AppRow:
@@ -241,7 +252,7 @@ def ollama_models(endpoint: str = OLLAMA_DEFAULT, timeout: float = 1.5) -> list[
     return out
 
 
-def _roles(cfg: dict[str, Any], loaded: list[LoadedModel] | None) -> list[RoleInfo]:
+def _roles(cfg: dict[str, Any], loaded: list[LoadedModel] | None, breakers: list[BreakerInfo] | None = None) -> list[RoleInfo]:
     models = cfg.get("models") or {}
     roles = models.get("roles") or {}
     tasks = models.get("tasks") or {}
@@ -253,7 +264,8 @@ def _roles(cfg: dict[str, Any], loaded: list[LoadedModel] | None) -> list[RoleIn
             continue
         used = [t for t, v in tasks.items() if role in (v if isinstance(v, list) else [v])]
         model = str(spec.get("model", ""))
-        out.append(RoleInfo(role=role, model=model, tasks=used, loaded=model in names or f"{model}:latest" in names))
+        out.append(RoleInfo(role=role, model=model, tasks=used, loaded=model in names or f"{model}:latest" in names,
+                            breaker=next((b for b in breakers or [] if b.model == model), None)))
     return out
 
 
@@ -284,10 +296,11 @@ def snapshot(root: str | Path, now: datetime | None = None, with_ollama: bool = 
             conn.close()
 
     _fill_daemon(snap, root, cfg, now)
+    _fill_health(snap, root, cfg, now)
     if with_ollama or ollama is not None:
         endpoint = str((cfg.get("llm") or {}).get("endpoint", OLLAMA_DEFAULT)) or OLLAMA_DEFAULT
         snap.models = (ollama or ollama_models)(endpoint)
-    snap.roles = _roles(cfg, snap.models)
+    snap.roles = _roles(cfg, snap.models, snap.breakers)
     return snap
 
 
@@ -462,6 +475,37 @@ def _fill_daemon(snap: Snapshot, root: Path, cfg: dict[str, Any], now: datetime)
         finished = parse_ts(snap.run.get("finished_at"))
         if finished and d.state == "running":
             d.next_cycle = finished + timedelta(seconds=interval)
+
+
+def _fill_health(snap: Snapshot, root: Path, cfg: dict[str, Any], now: datetime) -> None:
+    """What the running daemon says about itself in status.json: models it has stopped asking, and whether the config on disk is newer than
+    the one it loaded. Trusted only while the daemon that wrote the file is the one holding the lock (a leftover from an earlier run says nothing)."""
+    d = snap.daemon
+    status = _read_json((root / str((cfg.get("daemon") or {}).get("state_db", "state.db"))).with_name("status.json"))
+    if not isinstance(status, dict) or d.state not in ("running", "stalled") or not d.pid or status.get("pid") != d.pid:
+        return
+    updated = parse_ts(status.get("updated_at"))
+    age = max(0.0, (now - updated).total_seconds()) if updated else 0.0
+    listed = status.get("breakers")
+    for b in listed if isinstance(listed, list) else []:
+        try:
+            failures = int(b["failures"])
+            retry = max(0.0, float(b.get("open_for") or 0) - age)         # the cool-down kept running while nobody wrote the file
+            model = str(b["model"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if failures > 0:
+            snap.breakers.append(BreakerInfo(model=model, failures=failures, retry_in=retry))
+    sections = status.get("config_sections")
+    if not isinstance(sections, dict) or not cfg:                          # no record, or a config that cannot be read right now (mid-edit)
+        return
+    try:
+        if os.path.normcase(str(Path(str(status.get("config_path"))).resolve())) != os.path.normcase(str((root / "config.yaml").resolve())):
+            return                                                         # the daemon was started on another config file: nothing to compare
+        from config_loader import changed_sections
+    except (ImportError, OSError, ValueError):
+        return
+    snap.config_changed = changed_sections({str(k): str(v) for k, v in sections.items()}, cfg)
 
 
 @dataclass

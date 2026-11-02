@@ -103,6 +103,16 @@ def build(dest: Path | None = None) -> Path:
     conn.commit()
     conn.close()
 
+    from config_loader import load_config, section_fingerprints
+
+    cfg = load_config(root / "config.yaml")
+    started_with = {**cfg, "stage3": {**cfg["stage3"], "mode": "dry_run"}}          # the daemon "started" before stage3.mode was changed to autonomous
+    (root / "status.json").write_text(json.dumps({
+        "pid": os.getpid(), "started_at": _iso(now, hours=6, minutes=41), "updated_at": _iso(now, seconds=4),
+        "config_path": str((root / "config.yaml").resolve()), "config_sections": section_fingerprints(started_with),
+        "breakers": [{"endpoint": "http://127.0.0.1:11434/v1", "model": "deepseek-coder-v2-lite-local", "failures": 2, "open_for": 95.0}],
+    }), encoding="utf-8")
+
     def folder(job_id: str) -> Path:
         p = root / "applications" / job_id / "trace"
         p.mkdir(parents=True, exist_ok=True)

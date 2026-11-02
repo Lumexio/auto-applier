@@ -53,3 +53,23 @@ def load_config(path: str | Path = "config.yaml") -> dict[str, Any]:
     if local.is_file():
         config = deep_merge(config, _read(local))
     return config
+
+
+# --------------------------------------------------------------------------- has the config changed since it was loaded?
+#
+# The daemon reads its config once, when it starts. Editing config.local.yaml afterwards changes nothing until it is restarted, which is easy
+# to forget. The daemon therefore records a fingerprint of every top-level section as it loaded them (daemon_status.py), and the dashboards
+# compare that with the files on disk now.
+
+def section_fingerprints(config: dict[str, Any]) -> dict[str, str]:
+    """One short hash per top-level section, so a warning can say WHICH part changed. Key order and YAML formatting do not matter."""
+    import hashlib
+    import json
+
+    return {str(key): hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:12] for key, value in config.items()}
+
+
+def changed_sections(before: dict[str, str], config: dict[str, Any]) -> list[str]:
+    """The sections that were edited, added or removed since ``before`` (from ``section_fingerprints``), sorted."""
+    now = section_fingerprints(config)
+    return sorted(key for key in set(before) | set(now) if before.get(key) != now.get(key))

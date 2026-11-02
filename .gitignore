@@ -34,6 +34,8 @@ artifacts/
 jobs.json
 daemon.log
 *.log
+# What the running daemon tells the dashboards (breakers, the config it loaded)
+status.json*
 # Process ids written by setup.ps1
 *.pid
 

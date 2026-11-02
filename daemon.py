@@ -12,6 +12,7 @@ import threading
 import time
 import traceback
 import urllib.parse
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,9 @@ from stage2_filter.rank import stage2_run
 from stage3_apply.run import stage3_run
 from state import StateStore
 from import_profile import sync_system_firefox_profile
+import daemon_status
+import llm_client
+from config_loader import section_fingerprints
 from llm_client import check_health, detect_context_tokens, probe_roles
 
 
@@ -119,11 +123,32 @@ class LoggerTee:
 class Daemon:
     def __init__(self, config_path: str = "config.yaml", profile_path: str = "profile.json"):
         self.config = load_yaml_config(config_path)
+        self.config_path = config_path
+        self.config_sections = section_fingerprints(self.config)     # as loaded: the startup probes below add to self.config
+        self.started_at = datetime.now(timezone.utc).isoformat()
+        self.status_file = daemon_status.status_path(self.config)
+        self._publishing = False                                      # only the daemon that holds the lock writes the status file
+        self._status_at = 0.0
         self.profile_path = Path(profile_path)
         db_path = self.config.get("daemon", {}).get("state_db", "state.db")
         self.state = StateStore(db_path)
         self.running = True
         self._stop = threading.Event()
+
+    def _publish_status(self, force: bool = False) -> None:
+        """Refresh status.json (breakers, the config this process loaded) unless it was refreshed a moment ago."""
+        if not self._publishing:
+            return
+        now = time.monotonic()
+        if not force and now - self._status_at < daemon_status.WRITE_EVERY_S:
+            return
+        self._status_at = now
+        daemon_status.write(self.status_file, daemon_status.build(self.config_path, self.config_sections, self.started_at))
+
+    def _beat(self) -> None:
+        """The lock heartbeat, plus a fresh status file now and then."""
+        self.state.heartbeat()
+        self._publish_status()
 
     def probe_llm(self) -> bool:
         """Log whether the model is usable and measure its real context window (Ollama defaults to a tiny 2048 tokens)."""
@@ -171,7 +196,7 @@ class Daemon:
                 break
             if self._stop.wait(min(10.0, remaining)):
                 break
-            self.state.heartbeat()
+            self._beat()
 
     def run_forever(self, dry_run: bool = False) -> None:
         """Cycle until stopped. A failed cycle is logged and retried with backoff; it never ends the daemon."""
@@ -226,7 +251,7 @@ class Daemon:
             for target in target_urls:
                 if not self.running:
                     break
-                self.state.heartbeat()
+                self._beat()
                 print(f"[Stage 1] Ingesting postings from: {target}")
                 ats = parse_ats_target(target)
                 if ats and ats[0] == "greenhouse":
@@ -259,7 +284,7 @@ class Daemon:
                 return
 
             # Stage 2: Filtering & Ranking
-            self.state.heartbeat()
+            self._beat()
             filtered_jobs, diagnostics = stage2_run(
                 raw_jobs, profile, state=self.state, run_id=run_id, config=self.config
             )
@@ -270,7 +295,7 @@ class Daemon:
                 print(f"[Stage 2]   not for you: {example}")
 
             # Stage 3: Autonomous Application
-            self.state.heartbeat()
+            self._beat()
             run_config = self.config
             if dry_run:
                 run_config = dict(self.config)
@@ -283,7 +308,7 @@ class Daemon:
                 run_id=run_id,
                 config=run_config,
                 should_stop=lambda: not self.running,
-                on_tick=self.state.heartbeat,
+                on_tick=self._beat,
             )
 
             self.state.finish_run(run_id, "completed" if self.running else "halted")
@@ -313,6 +338,10 @@ class Daemon:
 
         self.probe_llm()
 
+        self._publishing = True                                      # we hold the lock: the dashboards may now read what we know about ourselves
+        llm_client.breaker_listener = lambda: self._publish_status(force=True)
+        self._publish_status(force=True)
+
         try:
             # We hold the lock, so any run still marked 'running' belongs to a daemon that died.
             halted = self.state.reconcile_stale_runs()
@@ -327,6 +356,9 @@ class Daemon:
             self.run_forever(dry_run=dry_run)
 
         finally:
+            llm_client.breaker_listener = None
+            self._publishing = False
+            daemon_status.remove(self.status_file)
             self.state.release_lock()
             self.state.close()
 

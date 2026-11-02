@@ -123,7 +123,21 @@ class Desk:
                     if now else None),
             "recent": [self._app_summary(a) for a in snap.recent[:40]],
             "log": [_clip(line, 240) for line in snap.log[-30:]],
+            "alerts": self._alerts(snap),
         }
+
+    @staticmethod
+    def _alerts(snap: Any) -> list[str]:
+        """Sentences for the banner under the header: what the running daemon says needs a person (status.json, read by tui.data)."""
+        out = []
+        if snap.config_changed:
+            out.append(f"The config was edited after the daemon started ({', '.join(snap.config_changed)}), so it still runs the old settings. "
+                       f"Restart it: ./setup.bat -StopAll, then ./setup.bat -All -Background")
+        for b in snap.breakers:
+            if b.retry_in > 0:
+                out.append(f"The model {_clip(b.model, 80)} is not answering ({b.failures} requests in a row); it is asked again in {int(b.retry_in)} seconds, "
+                           "and its jobs use the base model meanwhile.")
+        return out
 
     @staticmethod
     def _app_summary(a: Any) -> dict[str, Any]:

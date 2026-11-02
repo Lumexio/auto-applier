@@ -81,6 +81,8 @@
   .step { display: flex; gap: 8px; padding: 3px 0; font-size: 13.5px; }
   .step .n { color: var(--muted); min-width: 2em; }
   .banner { padding: 10px 14px; border-radius: 8px; background: var(--soft-warn); color: var(--warn); margin-bottom: 12px; }
+  .alerts { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
+  .alerts .banner { margin-bottom: 8px; }
   @media (max-width: 600px) { .thumb { width: 100%; } }
 </style>
 </head>
@@ -90,6 +92,7 @@
     <h1>Auto-Applier Desk</h1>
     <div class="status" id="status" aria-live="polite"></div>
   </div>
+  <div class="alerts" id="alerts"></div>
   <nav id="tabs" role="tablist"></nav>
 </header>
 <main id="main"></main>
@@ -194,6 +197,12 @@ function drawStatus() {
   if (o.mode) bar.append(h("span", {}, "mode ", h("b", {}, o.mode)));
   if (o.now && o.now.live) bar.append(h("span", {}, "applying: ", h("b", {}, o.now.title), " @ " + o.now.company));
   else if (d.activity) bar.append(h("span", { title: d.activity }, d.activity.length > 70 ? d.activity.slice(0, 69) + "…" : d.activity));
+}
+function drawAlerts() {
+  const list = (!state.offline && state.overview && state.overview.alerts) || [], key = JSON.stringify(list);
+  if (last.alerts === key) return;                                // redraw only on a change, so a screen reader does not repeat it every few seconds
+  last.alerts = key;
+  q("#alerts").replaceChildren(...list.map((text) => h("div", { class: "banner", role: "status" }, text)));
 }
 function drawTabs() {
   const nav = q("#tabs"), c = (state.inbox || {}).counts || {};
@@ -508,6 +517,7 @@ q("#dlg").addEventListener("click", (e) => { if (e.target === q("#dlg")) q("#dlg
 // ---------------------------------------------------------------- drawing and refreshing
 function draw(force) {
   drawStatus();
+  drawAlerts();
   drawTabs();
   const main = q("#main");
   if (!state.inbox) { if (!state.offline) main.replaceChildren(h("div", { class: "empty" }, "Loading…")); return; }
