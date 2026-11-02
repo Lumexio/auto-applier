@@ -88,6 +88,9 @@ This project takes the opposite approach:
 - **Education and employers come from the same dates**: your highest *finished* degree (one in progress is not it), its school, field and
   GPA, when your first bachelor's degree ended, and how many different companies you worked for in the last ten years / since that degree.
   Where your versions disagree (a different field of study, another GPA) nothing is claimed and `check` says so: state it in `facts.yaml`.
+- If you keep several PDF versions of your resume (`resume-frontend.pdf` beside `resume-base.pdf`), the one that fits the job is attached: the title decides
+  ("Frontend Engineer"), the posting text only when it clearly leans one way, and anything unclear ("Full Stack", no PDF for that kind) gets the default.
+  `stage3.resume_per_job: false` turns it off; `attachments.resumes` / `attachments.resume_rules` in `profile.json` list your own versions and words.
 - A technology your resumes never show is never claimed, and the career total is never offered for a question about a specific tool.
   What you write in `facts.yaml` always wins over what is computed.
 - Questions that were parked for a missing fact are re-checked every run: add the fact (or fix a resume) and those jobs are queued again.

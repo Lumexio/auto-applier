@@ -310,6 +310,7 @@ def main():
         ("Fit Veto Review", "test_p5_fit_review"),
         ("Terminal Dashboard (data and rendering)", "test_tui_data"),
         ("Daemon Health (stopped models and edited config in the dashboards)", "test_p15_health"),
+        ("Resume per Job (the version that fits the posting)", "test_p16_resume"),
         ("Location Filter", "test_p6_location"),
         ("Pending List and Boot Desk", "test_pending"),
         ("Source of Truth (resumes to facts)", "test_p7_source"),

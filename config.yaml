@@ -134,6 +134,7 @@ stage3:
   confirmation_timeout_seconds: 20     # extra wait for a confirmation page after the handler's own check
   in_progress_stale_minutes: 10
   max_attempts: 3        # failed / error-skipped postings are retried at most this many times; unconfirmed ones never
+  resume_per_job: true   # attach the resume version that fits the job (resume-frontend.pdf for a frontend title ...); false = always the default
   rate_limit:
     global_per_day: 25
     per_domain_per_hour: 5

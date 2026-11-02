@@ -15,6 +15,7 @@ from facts import load_facts, overlay_derived
 from fit import DEFAULT_FIT_CFG, FitScorer, build_fit_gate
 from llm_client import build_llm_cfg
 from form_questions import EXTRACT_JS
+import resume_pick
 from resume_facts import ensure_derived
 from sites import DEFAULT_PROBATION, site_fingerprint
 
@@ -768,8 +769,11 @@ def stage3_run(
                     if tx_ctx:
                         tx = tx_ctx.__enter__()
 
+                    job_profile, resume_note = resume_pick.for_job(profile, job) if stage3_cfg.get("resume_per_job", True) else (profile, "")
+                    if resume_note:
+                        print(f"[Stage 3] Resume for this job: {resume_note}")
                     handler.prepare(
-                        profile,
+                        job_profile,
                         job,
                         checkpoint_callback=(lambda step: tx.checkpoint(step)) if tx else None,
                     )
