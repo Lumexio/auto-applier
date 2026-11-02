@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+import doc_text
 from form_questions import Question
 from llm_client import LLMError, chat_json, context_budget, estimate_tokens
 from resume_facts import source_files
@@ -65,7 +66,7 @@ class Passage:
 
 
 def _lines_of(path: Path) -> list[str]:
-    raw = path.read_text(encoding="utf-8", errors="replace")
+    raw = doc_text.read(path)
     if path.suffix.lower() in (".html", ".htm"):
         raw = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", raw)
         raw = _HEADING_CLOSE.sub("\n", _HEADING_OPEN.sub("\n# ", raw))
@@ -110,7 +111,7 @@ def load_passages(cfg: dict[str, Any]) -> list[Passage]:
     for path in source_files(cfg):
         try:
             found = passages_from_file(path, f"{path.parent.name}/{path.name}")
-        except OSError:
+        except (OSError, doc_text.UnreadableDocument):
             continue
         for p in found:
             key = norm(p.text)

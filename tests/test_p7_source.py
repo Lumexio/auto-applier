@@ -217,9 +217,10 @@ def test_with_no_source_folder_configured_or_no_resumes_nothing_is_read():
         put(tmp, "a.html", resume())
         assert rf.source_dir({}) is None and rf.source_files({}) == [] and rf.derive({}) == {} and rf.ensure_derived({}) == {}      # opt-in: never reads by default
         assert rf.ensure_derived({"paths": {"source_dir": str(tmp / "empty")}}) == {}
-        (tmp / "me" / "resumes" / "x.pdf").write_bytes(b"%PDF")
+        (tmp / "me" / "resumes" / "a.pdf").write_bytes(b"%PDF")                                                  # the printout of a.html: never read a second time
+        (tmp / "me" / "resumes" / "x.doc").write_bytes(bytes([0xD0, 0xCF]))                                  # the old binary Word format is not read
         (tmp / "me" / "resumes" / ".hidden.md").write_text("## Experience", encoding="utf-8")
-        assert [p.name for p in rf.source_files(cfg_for(tmp))] == ["a.html"]                                   # PDFs and dot files are not resumes
+        assert [p.name for p in rf.source_files(cfg_for(tmp))] == ["a.html"]                                   # printouts, .doc and dot files are not resumes
 
 
 def test_the_derived_file_is_reused_until_a_resume_the_policy_or_the_month_changes():

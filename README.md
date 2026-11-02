@@ -102,7 +102,6 @@ The loop below is built, tested and run by the daemon today. Each row points at 
 | Left out | Why, and what to do meanwhile |
 |---|---|
 | Recruiter outreach | Built but **off** (`outreach.enabled: false`). A draft-and-approve queue, so that nothing is ever sent without your OK, comes first. |
-| Reading PDF and DOCX resumes | PDFs are attached to applications but never read; keep a `.md` or `.html` version in `me/` for the computed facts. |
 | Re-checking `unconfirmed` applications | They are listed for you to check by hand (web interface, tab *Not confirmed*). Nothing looks them up automatically. |
 | File pickers that are not a plain upload field | The agent uploads through ordinary `<input type="file">` fields. A custom picker is not handled yet: read `applications/<job>/trace/` to see where such a job stopped. |
 | CAPTCHAs, new accounts, email codes | Never, by design: those jobs are skipped or parked for you. |
@@ -136,7 +135,8 @@ The loop below is built, tested and run by the daemon today. Each row points at 
 
 ### Your source of truth
 - Put your resume versions (and notes about your work) in `me/` (never committed; `python source.py sync` copies them from your
-  resume-template folder). **Years of experience are computed from the dates next to each job**, a framework implies its language
+  resume-template folder). Markdown, HTML, text, Word (`.docx`) and PDF are all read; a PDF or Word file that sits beside a text version
+  of the same name is that version's printout and is not read twice. A scan, a locked PDF or a file with no text is reported, never guessed at. **Years of experience are computed from the dates next to each job**, a framework implies its language
   (Laravel -> PHP, Vue -> JavaScript), and every number records where it came from. `python source.py show` prints them,
   `python source.py check` looks for contradictions between your versions.
 - **Education and employers come from the same dates**: your highest *finished* degree (one in progress is not it), its school, field and

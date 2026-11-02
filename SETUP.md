@@ -695,10 +695,18 @@ python source.py check     # do your versions agree with each other, and with th
 ```
 
 ```
-me/resumes/      resume-backend.md, resume-frontend.md, resume-base.html ...   (what `sync` copies; PDFs are kept for uploading, not read)
+me/resumes/      resume-backend.md, resume-frontend.md, resume-base.html, resume-old.docx, resume-other.pdf ...   (what `sync` copies)
 me/experience/   notes in your own words (.md); a heading with a date range ("## Acme, Backend (Mar 2019 - Present)") counts like a job
 me/derived/      experience.yaml, written by the program: every number with where it came from. Do not edit it.
 ```
+
+**Word and PDF files are read too.** A `.docx` is unpacked with the standard library; a `.pdf` needs `pypdf` (in `requirements.txt`; `python -m pip install pypdf`). Neither format
+has Markdown's headings, so the reader restores only two things: a line that is nothing but a section name ("Experience", "WORK HISTORY", "Skills:") becomes a heading, and
+a leading bullet glyph becomes a dash; Word's own heading and list styles are used too. Because of that, Markdown stays the safer source when you have both, and a PDF or Word file
+that sits beside a text version with the same name (`resume-base.pdf` beside `resume-base.md`) is that version's printout and is **not read a second time** (so no job is counted twice).
+A file with almost no text (a scan), whose fonts come out as symbols, that is password-protected, or a PDF when `pypdf` is missing is listed by `python source.py check` with the reason;
+nothing is guessed from it. The old binary `.doc` format is not read: save it as `.docx`. Reading a PDF can split a job's title and its dates onto different lines; where a company
+cannot be told, the employer counts stay unclaimed rather than guessed (`source.py check` says so).
 
 How a number is worked out, in order:
 

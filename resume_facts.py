@@ -24,6 +24,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import doc_text
 from stage2_filter.relevance import skill_in
 
 DEFAULT_SOURCE_CFG: dict[str, Any] = {
@@ -34,7 +35,8 @@ DEFAULT_SOURCE_CFG: dict[str, Any] = {
     },
 }
 RESUME_SUFFIXES = (".md", ".markdown", ".html", ".htm", ".txt")
-UNREAD_SUFFIXES = (".pdf", ".docx", ".doc")            # not read: the PDFs are built from the Markdown / HTML versions
+DOCUMENT_SUFFIXES = doc_text.DOCUMENT_SUFFIXES        # .docx and .pdf: read too, unless they are the printout of a text version beside them
+UNREAD_SUFFIXES = (".doc",)                           # the old binary Word format: save it as .docx
 
 _DASH = "-" + chr(0x2013) + chr(0x2014)
 _MONTH = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?"
@@ -435,7 +437,7 @@ def parse_markdown(text: str, name: str, today: date) -> Resume:
 
 
 def parse_resume(path: Path, today: date) -> Resume:
-    text = path.read_text(encoding="utf-8", errors="replace")
+    text = doc_text.read(path)
     if any(marker in text for marker in ("carrer-item", "career-item", "project-item", "education-item")):
         return parse_template(text, path.name, today)
     return parse_markdown(text, path.name, today)
@@ -463,7 +465,8 @@ def source_files(cfg: dict[str, Any]) -> list[Path]:
     for sub in ("resumes", "experience"):
         d = root / sub
         if d.is_dir():
-            files.extend(sorted(p for p in d.iterdir() if p.is_file() and p.suffix.lower() in RESUME_SUFFIXES and not p.name.startswith(".")))
+            files.extend(sorted(p for p in d.iterdir() if p.is_file() and not p.name.startswith(".") and (
+                p.suffix.lower() in RESUME_SUFFIXES or (p.suffix.lower() in DOCUMENT_SUFFIXES and not doc_text.twin_exists(p)))))
     return files
 
 
@@ -637,8 +640,8 @@ def spoken_languages(files: list[Path]) -> tuple[dict[str, str], dict[str, str]]
     where: dict[str, str] = {}
     for path in files:
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            text = doc_text.read(path)
+        except (OSError, doc_text.UnreadableDocument):
             continue
         for found in _SPOKEN_ITEM.finditer(plain(text)):
             m = re.match(r"([A-Za-z]+)\s*\(([^)]*)\)", found.group(0))
@@ -661,6 +664,8 @@ def derive(cfg: dict[str, Any], today: date | None = None) -> dict[str, Any]:
     for p in files:
         try:
             resumes.append(parse_resume(p, today))
+        except doc_text.UnreadableDocument as e:                  # a Word or PDF file that has no usable text says why
+            unread.append(f"{p.name}: {e}")
         except Exception as e:                                    # a broken file must not hide the others
             unread.append(f"{p.name}: {type(e).__name__}")
     entries, conflicts = merge_versions([e for r in resumes for e in r.entries])
