@@ -85,6 +85,9 @@ This project takes the opposite approach:
   resume-template folder). **Years of experience are computed from the dates next to each job**, a framework implies its language
   (Laravel -> PHP, Vue -> JavaScript), and every number records where it came from. `python source.py show` prints them,
   `python source.py check` looks for contradictions between your versions.
+- **Education and employers come from the same dates**: your highest *finished* degree (one in progress is not it), its school, field and
+  GPA, when your first bachelor's degree ended, and how many different companies you worked for in the last ten years / since that degree.
+  Where your versions disagree (a different field of study, another GPA) nothing is claimed and `check` says so: state it in `facts.yaml`.
 - A technology your resumes never show is never claimed, and the career total is never offered for a question about a specific tool.
   What you write in `facts.yaml` always wins over what is computed.
 - Questions that were parked for a missing fact are re-checked every run: add the fact (or fix a resume) and those jobs are queued again.

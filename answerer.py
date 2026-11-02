@@ -224,11 +224,17 @@ def _countries_in(text: str) -> list[str]:
     return found
 
 
+def _derived_answer(ctx: AnswerContext, q: Question, value: Any, path: str) -> Answer | Blocked:
+    """``value`` for ``path``: said to come from your resumes (with the lines it rests on) when facts.yaml did not state it."""
+    note = (ctx.facts.get("_provenance") or {}).get(path)
+    return deliver(q, value, "derived", f"{path} ({note})") if note else deliver(q, value, "fact", path)
+
+
 def _fact_answer(ctx: AnswerContext, q: Question, path: str, shape: Callable[[Any], Any] | None = None) -> Answer | Blocked:
     value = ctx.fact(path)
     if value is None or value == "":
         return Blocked(f"'{path}' is not stated in facts.yaml")
-    return deliver(q, shape(value) if shape else value, "fact", path)
+    return _derived_answer(ctx, q, shape(value) if shape else value, path)
 
 
 # Words that can follow "experience with/in/of" without naming a particular technology.
@@ -291,6 +297,67 @@ def _years(ctx: AnswerContext, q: Question, t: str) -> Answer | Blocked:
     return _years_answer(ctx, q, total, "experience.total_years")
 
 
+# A grade average or degree that is not the one in your resumes' highest finished degree ("high school GPA", "master's GPA").
+_ANOTHER_DEGREE = re.compile(r"high school|secondary|preparatory|middle school|elementary|primary school|(?<!under)graduate|post ?grad|master|doctor|ph ?d|\bmba\b")
+_SCALE_ASKED = re.compile(r"(?:out of|scale of|on a|\bof)\s+(\d+(?: \d+)?)\b|\b(\d+(?: \d+)?)\s+(?:point|scale)\b")
+_COMPANY_COUNT = re.compile(r"\bhow many\b.*\b(?:companies|employers|organi[sz]ations)\b|\bnumber of\b.*\b(?:companies|employers|organi[sz]ations)\b")
+_TEN_YEARS = re.compile(r"\b(?:past|last|previous)\s+(?:ten|10)\s+years\b")
+_SINCE_DEGREE = re.compile(r"\bsince\b.*\b(?:graduat\w*|degree|undergrad\w*|bachelor\w*|university|college)\b")
+_DEGREE_YEAR = re.compile(r"\b(?:first|undergrad\w*|bachelor\w*)\b.*\bdegree\b|\bdegree\b.*\b(?:first|undergrad\w*|bachelor\w*)\b")
+_DEGREE_DONE = re.compile(r"\b(?:complet\w*|graduat\w*|expect\w*|obtain\w*|earn\w*|confer\w*|finish\w*)\b")
+_YEAR = re.compile(r"\b(19\d\d|20\d\d)\b")
+_COMPARED = re.compile(r"\b(?:before|after|prior|earlier|later|by|since|until|within|at least)\b")
+
+
+def _gpa(ctx: AnswerContext, q: Question, t: str) -> Answer | Blocked | None:
+    """The GPA your resumes give for your highest finished degree. A question about another school or degree is not this fact's to
+    answer (None: it goes on to your notes and the person), and neither is a different grading scale."""
+    if _ANOTHER_DEGREE.search(t):
+        return None
+    if "%" in q.label or "percent" in t:
+        return Blocked("asks for a percentage; your resumes give a GPA")
+    gpa = ctx.fact("education.gpa")
+    if gpa is None:
+        return Blocked("'education.gpa' is not stated in facts.yaml and no resume gives a GPA")
+    degree = ctx.fact("education.gpa_degree")
+    if re.search(r"undergrad|bachelor", t) and degree not in (None, "Bachelor's Degree"):
+        return None                                                                    # the grade on file is the {degree}'s
+    scale = ctx.fact("education.gpa_scale")
+    asked = _SCALE_ASKED.search(t)
+    if asked:
+        wanted = (asked.group(1) or asked.group(2)).replace(" ", ".")             # "4 0" is what "4.0" becomes in a question's key
+        if scale is None or float(scale) != float(wanted):
+            return Blocked(f"asks for a GPA out of {wanted}; your GPA is {_number_text(gpa)}{f' out of {_number_text(scale)}' if scale else ''}")
+    return _derived_answer(ctx, q, _number_text(gpa), "education.gpa")
+
+
+def _companies(ctx: AnswerContext, q: Question, t: str) -> Answer | Blocked | None:
+    """"How many companies have you worked for in the last ten years / since you graduated". Other windows are not worked out."""
+    ten, since = _TEN_YEARS.search(t), _SINCE_DEGREE.search(t)
+    if not (ten or since):
+        return None
+    path = ("experience.companies_since_first_degree_last_10_years" if ten and since
+            else "experience.companies_last_10_years" if ten else "experience.companies_since_first_degree")
+    value = ctx.fact(path)
+    if value is None:
+        return Blocked(f"'{path}' is not stated in facts.yaml and your resumes do not give the dates it needs")
+    return _derived_answer(ctx, q, _number_text(value), path)
+
+
+def _degree_year(ctx: AnswerContext, q: Question, t: str) -> Answer | Blocked | None:
+    """"Please confirm that your first degree completed, or is expected to complete, in 2025 or 2026": a yes or a no from the year your
+    first bachelor's degree ended. A question that compares ("before 2020") is not answered here."""
+    years = [int(y) for y in _YEAR.findall(t)]
+    if not years or _COMPARED.search(t):
+        return None
+    graduated = ctx.fact("education.first_degree_year")
+    if graduated is None:
+        return Blocked("'education.first_degree_year' is not stated in facts.yaml and no resume dates your first degree")
+    between = len(years) == 2 and bool(re.search(r"\bbetween\b|\b(?:19|20)\d\d\s+(?:to|through|and)?\s*(?:19|20)\d\d\b", t))       # "2025 2027" is "2025-2027"
+    inside = min(years) <= int(graduated) <= max(years) if between else int(graduated) in years
+    return _derived_answer(ctx, q, bool(inside), "education.first_degree_year")
+
+
 def apply_rules(q: Question, ctx: AnswerContext) -> Answer | Blocked | None:
     """An answer, a Blocked (recognised but cannot be answered from facts), or None (no rule applies)."""
     t = q.key
@@ -334,6 +401,16 @@ def apply_rules(q: Question, ctx: AnswerContext) -> Answer | Blocked | None:
         if authorised is None:
             return Blocked("'work_authorization.authorized_countries' is not stated in facts.yaml")
         return deliver(q, countries[0] in authorised, "fact", "work_authorization.authorized_countries")
+
+    if _COMPANY_COUNT.search(t):
+        counted = _companies(ctx, q, t)
+        if counted is not None:
+            return counted
+
+    if _DEGREE_YEAR.search(t) and _DEGREE_DONE.search(t) and _YEAR.search(t):
+        confirmed = _degree_year(ctx, q, t)
+        if confirmed is not None:
+            return confirmed
 
     if re.search(r"\byears?\b", t) and "experience" in t:
         return _years(ctx, q, t)
@@ -382,6 +459,8 @@ def apply_rules(q: Question, ctx: AnswerContext) -> Answer | Blocked | None:
         return _fact_answer(ctx, q, "employment.current_company")
     if re.search(r"current (?:job )?title|current position", t):
         return _fact_answer(ctx, q, "employment.current_title")
+    if re.search(r"\bgpa\b|grade point average", t):
+        return _gpa(ctx, q, t)
     if re.search(r"highest (?:level of )?(?:education|degree)|level of education", t):
         return _fact_answer(ctx, q, "education.highest_degree")
     if re.search(r"field of study|\bmajor\b", t):

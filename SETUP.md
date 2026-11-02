@@ -684,6 +684,17 @@ A computed value is rounded as a person would (4.2 -> 4, 0.9 -> 1) and is record
 evidence; a value you stated is used exactly as written. `source.experience.count: jobs_and_projects` makes your projects count as
 work too. If two resume versions give different dates for the same job, the shorter is used and `check` reports it.
 
+**Education and companies** are worked out the same way, from the Education section and the job dates of every version:
+
+| Fact (under `education:` / `experience:`) | Where it comes from |
+|---|---|
+| `highest_degree`, `school`, `field_of_study` | the highest degree whose dates are over (a master's marked "Present" or ending next year is not counted) |
+| `gpa`, `gpa_scale` (and `gpa_degree`) | the GPA written next to that degree; none is claimed for a degree that states no GPA |
+| `first_degree_graduated`, `first_degree_year` | when your first bachelor's degree ended (only a year written: December is assumed, and the report says so) |
+| `companies_last_10_years`, `companies_since_first_degree`, `companies_since_first_degree_last_10_years` | different employers among the dated jobs that overlap that stretch; a job with no company name stops the count instead of guessing |
+
+This answers "highest level of education", "GPA" (never a high-school or master's GPA, and never on another scale than the one written), "how many companies have you worked for in the past ten years / since you graduated" and "confirm your first degree completed in 2025 or 2026" (a plain yes or no from the year it ended). If two versions give a different field of study, GPA or end month, the value is left out and `python source.py check` names both versions; state the right one in `facts.yaml` (`education: {field_of_study: ...}`).
+
 It refreshes by itself when a resume changes or the month turns ("Present" moves). And every run it re-checks the **parked
 questions**: any that these facts can now answer are resolved and the jobs that were only waiting on them are queued again, so
 fixing a resume or a fact un-parks the backlog without you running anything.

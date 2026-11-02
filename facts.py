@@ -67,7 +67,7 @@ def overlay_derived(facts: dict[str, Any], derived: dict[str, Any]) -> dict[str,
     """
     if not derived:
         return facts
-    layer = {k: derived[k] for k in ("experience", "narrative", "languages") if isinstance(derived.get(k), dict)}
+    layer = {k: derived[k] for k in ("experience", "education", "narrative", "languages") if isinstance(derived.get(k), dict)}
     merged = copy.deepcopy(facts)
     taken: list[str] = []
     _fill(merged, layer, "", taken)

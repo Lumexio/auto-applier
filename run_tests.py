@@ -317,6 +317,7 @@ def main():
         ("Web Interface (what needs a person)", "test_p11_gui"),
         ("Agent Takeover, Failure Evidence and Sign-in Walls", "test_p12_takeover"),
         ("Page Furniture, Dropdowns and Generic Uploads", "test_p13_widgets"),
+        ("Degrees, Grades and Company Counts (from your resumes)", "test_p14_education"),
         ("Repository Hygiene (public repo)", "test_repo_hygiene"),
         ("Multi-user Readiness (config layers, profile, licence)", "test_p8_multiuser"),
     ):
