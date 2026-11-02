@@ -213,6 +213,51 @@ def test_enabling_the_desk_replaces_the_old_login_entry_and_touches_nothing_else
         assert "Already disabled" in run(env, "-DisableDesk")                                                  # idempotent
 
 
+def test_setup_all_opens_the_desk_and_setup_all_background_stays_silent():
+    setup = (ROOT / "setup.ps1").read_text(encoding="utf-8")
+    desk = (ROOT / "desk.ps1").read_text(encoding="utf-8")
+    body = setup[setup.index("if ($All) {"):]
+    body = body[:body.index("if ($StopAll)")]
+    # the desk's own daemon pane runs "-All -Background": if that branch opened the desk the desk would open itself again, forever
+    assert body.index("if ($Background)") < body.index("desk.ps1") and "Start-AllServices" in body[:body.index("desk.ps1")]
+    assert body.index("exit 0") < body.index("desk.ps1"), "the silent branch must leave before the desk is opened"
+    assert "$flags = @{ Background = $true; SkipChecks = $true }" in desk and "$flags.All = $true" in desk
+    assert "ContainsKey(\"Browser\")" in body, "-Browser is passed on only when the user typed it, so the config's engine is not overridden by the default"
+    assert '[ValidateSet("", "firefox", "chromium", "webkit")][string]$Browser' in desk
+    # the engine must reach the daemon pane in Windows Terminal, in the plain-window fallback, and from the pane on to "setup -All -Background"
+    assert '$(if ($Browser) { " -Browser $Browser" } else { "" })' in desk
+    assert 'if ($Browser) { $daemonList += @("-Browser", $Browser) }' in desk
+    assert "if ($Browser) { $flags.Browser = $Browser }" in desk
+    assert "setup -All                  (Start everything and open it" in setup
+
+
+def test_setup_all_hands_its_flags_to_the_desk():
+    exe = shutil.which("powershell.exe") or shutil.which("powershell")
+    if not exe:
+        return
+    import tempfile
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as fake:
+        folder = Path(fake)
+        shutil.copy(ROOT / "setup.ps1", folder / "setup.ps1")
+        # a stand-in desk that only records how it was called: nothing real is started
+        (folder / "desk.ps1").write_text(
+            'param ([switch]$NoGui, [switch]$DaemonOnly, [string]$Browser = "")\r\n'
+            '"NoGui=$NoGui DaemonOnly=$DaemonOnly Browser=[$Browser]" | Out-File (Join-Path $PSScriptRoot "called.txt") -Encoding ascii\r\n',
+            encoding="ascii", newline="")
+
+        def called(*flags):
+            (folder / "called.txt").unlink(missing_ok=True)
+            r = subprocess.run([exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(folder / "setup.ps1"), "-All", "-SkipChecks", *flags],
+                               capture_output=True, text=True, timeout=120)
+            assert r.returncode == 0, r.stdout + r.stderr
+            return (folder / "called.txt").read_text(encoding="ascii").strip()
+
+        assert called() == "NoGui=False DaemonOnly=False Browser=[]"
+        assert called("-NoGui") == "NoGui=True DaemonOnly=False Browser=[]"
+        assert called("-Browser", "chromium") == "NoGui=False DaemonOnly=False Browser=[chromium]"
+
+
 def test_both_scripts_parse_in_windows_powershell():
     exe = shutil.which("powershell.exe") or shutil.which("powershell")
     if not exe:

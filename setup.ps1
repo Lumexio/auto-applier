@@ -2,7 +2,9 @@
 # AI Auto Job Applier — Setup & Bootstrapper (PowerShell)
 # Usage:
 #   ./setup                       (Interactive menu)
-#   ./setup -All -Background      (Start All-in-One: Daemon + web interface + API + Langflow)
+#   ./setup -All                  (Start everything and open it: the services, then the dashboard, what is pending, the daemon
+#                                  log, the web interface and Langflow in your browser. Add -NoGui to leave the browser out)
+#   ./setup -All -Background      (Start the same services silently, with nothing opened: Daemon + web interface + API + Langflow)
 #   ./setup -StopAll              (Stop all background services)
 #   ./setup -EnableAutoStart      (Enable auto-start on Windows PC boot/login)
 #   ./setup -DisableAutoStart     (Disable auto-start on Windows PC boot/login)
@@ -498,7 +500,18 @@ function Show-DaemonStatus {
 
 # Handle Command Line Arguments
 if ($All) {
-    Start-AllServices -AsBackground:$Background -BrowserEngine $Browser
+    if ($Background) {
+        # Silent: the daemon, the web interface, the API and Langflow, nothing opened (the desk's daemon pane, the login entry and
+        # every "restart it" instruction use this)
+        Start-AllServices -AsBackground:$Background -BrowserEngine $Browser
+        exit 0
+    }
+    # Everything, and in front of you: the desk starts the same services (its daemon pane runs "-All -Background") and opens the
+    # dashboard, what is pending, the daemon log, the web interface and Langflow
+    $deskArgs = @{}
+    if ($NoGui) { $deskArgs.NoGui = $true }
+    if ($PSBoundParameters.ContainsKey("Browser")) { $deskArgs.Browser = $Browser }
+    & (Join-Path $ProjectDir "desk.ps1") @deskArgs
     exit 0
 }
 
@@ -608,7 +621,7 @@ if ($SyncCookies) {
 while ($true) {
     Write-Host "`n-------------------------------------------------------" -ForegroundColor DarkCyan
     Write-Host "Select an action to launch:" -ForegroundColor White
-    Write-Host "  [0] Start All-in-One (Daemon + REST API + Langflow Web UI)" -ForegroundColor Green
+    Write-Host "  [0] Start All-in-One silently (Daemon + web interface + REST API + Langflow; opens nothing)" -ForegroundColor Green
     Write-Host "  [1] Start Langflow Web UI (http://localhost:7860)" -ForegroundColor Yellow
     Write-Host "  [2] Pre-Login to Target Job Site (Preserves Sessions)" -ForegroundColor Yellow
     Write-Host "  [3] Start Auto Applier Daemon (Foreground or Background)" -ForegroundColor Yellow

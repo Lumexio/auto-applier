@@ -532,7 +532,8 @@ the flags below skip the menu.
 
 | Command | What it does |
 |---|---|
-| `setup.bat -All -Background` | Start the daemon, the web interface (port 8765), the REST API (port 8000) and Langflow (port 7860) in the background |
+| `setup.bat -All` | Start everything and open it: the daemon, the web interface (port 8765), the REST API (port 8000) and Langflow (port 7860), and in front of you the dashboard, what is waiting for you and the daemon log in one Windows Terminal window, with the web interface and Langflow opening in your default browser once they answer (`-NoGui` leaves the browser out, `-Browser chromium` picks the engine the daemon applies with). The same as `setup.bat -Desk` |
+| `setup.bat -All -Background` | Start the same four services silently, opening nothing (what the login entry and the "restart it" hints use) |
 | `setup.bat -Gui` | Open the web interface for what needs you in your browser (starts it if it is not running) |
 | `setup.bat -Daemon -Background` | Start only the daemon, detached |
 | `setup.bat -Status` | Show what is running |

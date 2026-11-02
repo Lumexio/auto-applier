@@ -13,13 +13,15 @@
 #
 # The bottom pane starts the services itself, and only once Ollama answers: the daemon checks the models a single time, at
 # start, so one that starts before Ollama is ready runs the whole session without its extra models.
-# Add -DaemonOnly to leave the REST API and Langflow out (and with them the browser).
+# Add -DaemonOnly to leave the REST API and Langflow out (and with them the browser). -Browser firefox|chromium|webkit picks the
+# engine the daemon applies with. "setup.bat -All" is this script with the same flags.
 # ==============================================================================
 
 param (
     [ValidateSet("Launch", "Daemon", "Pending", "Gui")][string]$Pane = "Launch",
     [switch]$DaemonOnly,
     [switch]$NoGui,
+    [ValidateSet("", "firefox", "chromium", "webkit")][string]$Browser = "",
     [string]$Url = "http://localhost:7860",
     [string]$OpenWith = "",
     [double]$WaitMinutes = 10
@@ -109,6 +111,7 @@ if ($Pane -eq "Daemon") {
     }
 
     $flags = @{ Background = $true; SkipChecks = $true }
+    if ($Browser) { $flags.Browser = $Browser }
     if ($DaemonOnly) { $flags.Daemon = $true } else { $flags.All = $true }
     for ($attempt = 1; $attempt -le 6; $attempt++) {
         & $Setup @flags
@@ -129,7 +132,7 @@ if ($Pane -eq "Daemon") {
 }
 
 # --------------------------------------------------------------------------- launch the window
-$daemonArgs = "-Pane Daemon" + $(if ($DaemonOnly) { " -DaemonOnly" } else { "" }) + $(if ($NoGui) { " -NoGui" } else { "" })
+$daemonArgs = "-Pane Daemon" + $(if ($DaemonOnly) { " -DaemonOnly" } else { "" }) + $(if ($NoGui) { " -NoGui" } else { "" }) + $(if ($Browser) { " -Browser $Browser" } else { "" })
 $ps = "powershell.exe -NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -File `"$Self`""
 
 if (Get-Command wt.exe -ErrorAction SilentlyContinue) {
@@ -148,6 +151,7 @@ if (Get-Command wt.exe -ErrorAction SilentlyContinue) {
     $daemonList = @("-NoLogo", "-NoProfile", "-NoExit", "-ExecutionPolicy", "Bypass", "-File", $Self, "-Pane", "Daemon")
     if ($DaemonOnly) { $daemonList += "-DaemonOnly" }
     if ($NoGui) { $daemonList += "-NoGui" }
+    if ($Browser) { $daemonList += @("-Browser", $Browser) }
     Start-Process -FilePath "powershell.exe" -ArgumentList $daemonList -WorkingDirectory $ProjectDir
     Write-Host "Desk opened in three windows (install Windows Terminal for a single tiled window)." -ForegroundColor Green
 }
