@@ -74,15 +74,23 @@ _SNAPSHOT_BODY = r"""
   const inChrome = (el) => !!el.closest('nav, header, footer, [role="navigation"], [role="banner"], [role="contentinfo"]');
   const actions = [];
   let n = 0;
-  for (const el of deepAll(document, 'button, a[href], [role="button"], [role="link"], input[type="submit"], input[type="button"]')) {
+  for (const el of deepAll(document, 'button, a[href], [role="button"], [role="link"], input[type="submit"], input[type="button"], [class*="dropzone" i]')) {
     if (!isVisible(el) || el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
     if (dialogs.length && !scope.contains(el)) continue;          // a dialog is open: the page behind it is not actionable
     const label = clean(el.getAttribute('aria-label') || el.innerText || el.value || el.getAttribute('title') || '').slice(0, 90);
     if (!label) continue;
     const id = base + n++;
     el.setAttribute('data-aa-act', String(id));
+    let near = '';                                   // what surrounds an upload button ("Resume/CV *"): the button alone may only say "Upload"
+    if (/upload|attach|browse|choose|select (a )?file|drop|add (a |your )?(resume|cv|file)/i.test(label)) {
+      let up = el.parentElement;
+      for (let hop = 0; up && hop < 4 && !up.matches('form, body, main, [role="dialog"]'); hop++, up = up.parentElement) {
+        const around = clean(up.innerText || '');
+        if (around.length > label.length + 3) { near = around.slice(0, 140); break; }
+      }
+    }
     actions.push({
-      id, label, tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', type: (el.getAttribute('type') || '').toLowerCase(),
+      id, label, near, tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', type: (el.getAttribute('type') || '').toLowerCase(),
       href: el.tagName === 'A' ? el.href : '', target: el.getAttribute('target') || '',
       in_form: !!el.closest('form, [role="dialog"]'), chrome: inChrome(el) && !el.closest('form, [role="dialog"], dialog'),
     });
@@ -131,6 +139,7 @@ class Action:
     chrome: bool = False
     frame: int = 0
     category: str = "other"
+    near: str = ""                              # the text around an upload button, e.g. "Resume/CV * Upload"
 
 
 @dataclass
@@ -146,12 +155,30 @@ class FileField:
 
     @property
     def kind(self) -> str:
-        words = f"{self.label} {self.name}".lower()
-        if re.search(r"cover|letter", words):
-            return "cover_letter"
-        if re.search(r"resume|résumé|\bcv\b|curricul", words):
-            return "resume"
-        return "other"
+        return upload_kind(f"{self.label} {self.name}")
+
+
+_COVER = re.compile(r"cover|letter", re.IGNORECASE)
+_RESUME = re.compile(r"resume|résumé|\bcv\b|curricul", re.IGNORECASE)
+
+
+def upload_kind(words: str) -> str:
+    """resume | cover_letter | other: which document a file slot or upload button is for."""
+    if _COVER.search(words):
+        return "cover_letter"
+    if _RESUME.search(words):
+        return "resume"
+    return "other"
+
+
+def upload_button_kind(label: str, near: str) -> str:
+    """The same for a button: its own words first, then the text around it, and only when that names one document (a wide wrapper that
+    holds both a resume and a cover letter slot says nothing about this button)."""
+    kind = upload_kind(label)
+    if kind != "other":
+        return kind
+    cover, resume = bool(_COVER.search(near)), bool(_RESUME.search(near))
+    return "cover_letter" if cover and not resume else "resume" if resume and not cover else "other"
 
 
 @dataclass

@@ -184,7 +184,25 @@ fit:
   second_opinion: true           # a deal-breaker that overrides a good score must be confirmed by the `fit_review` model (see models:), or the job
                                  # is parked for you; your own facts waive vetoes they already answer. Decide with: python fit_review.py list
 
+# An application whose submit click was followed by neither a confirmation nor an error is "unconfirmed" and is never sent again. LinkedIn and
+# Handshake remember what you applied to, so after each cycle the bot opens the oldest ones and, if the posting now says you applied ("Applied 2
+# days ago", "See application status"), records them as submitted. It only reads the page: no clicks, no forms, no CAPTCHAs. Look: python reverify.py status
+reverify:
+  enabled: true
+  sites: [linkedin, handshake]   # sites that remember applications; on any other site a second look proves nothing
+  min_age_hours: 6               # time the site gets to show the application before the first look
+  recheck_hours: 24              # between two looks at the same posting
+  max_checks: 4                  # looks that found the posting without a sign of an application; after that it is left to you
+  max_per_cycle: 5
+  delay_seconds: [4, 10]
+  headless: true
+
+# Messages to the recruiter of a posting you applied to (LinkedIn). OFF by default. When on, a short note is DRAFTED after each submitted
+# application and put on a list; nothing is sent until you approve it (python outreach_queue.py list, or "Needs you" in the web interface).
+# The daemon then sends only the approved ones, in your wording, after its cycle and within max_per_day.
 outreach:
-  enabled: false         # OFF until recruiter detection/status handling is fixed (it mis-reported every attempt as already_connected)
-  max_per_day: 5
+  enabled: false
+  approval: true         # false = send without asking (not recommended: it is your LinkedIn account writing to people)
+  max_per_day: 5         # messages sent per day (drafts waiting for you do not count)
+  max_waiting: 20        # no new draft is written while this many wait for you
   template: "Hi {recruiter_name}, I applied for the {job_title} role at {company}. With my background in {skill}, I'd love to connect. Best, {candidate_name}."

@@ -24,6 +24,8 @@ from state import StateStore
 from import_profile import sync_system_firefox_profile
 import daemon_status
 import llm_client
+import outreach_queue
+import reverify
 from config_loader import section_fingerprints
 from llm_client import check_health, detect_context_tokens, probe_roles
 
@@ -310,6 +312,21 @@ class Daemon:
                 should_stop=lambda: not self.running,
                 on_tick=self._beat,
             )
+
+            if self.running and not dry_run:
+                # After stage 3, each in the bot's own browser and never able to fail a cycle: a second look at applications that were sent but never
+                # confirmed, then the messages to recruiters that you approved.
+                for tag, what, work in (
+                    ("Reverify", "look at the unconfirmed applications again", reverify.run),
+                    ("Outreach", "send the approved messages", outreach_queue.send_approved),
+                ):
+                    if not self.running:
+                        break
+                    self._beat()
+                    try:
+                        work(self.state, self.config, should_stop=lambda: not self.running, on_tick=self._beat)
+                    except Exception as e:
+                        print(f"[{tag}] Could not {what} ({type(e).__name__}: {e}).")
 
             self.state.finish_run(run_id, "completed" if self.running else "halted")
             print(f"[Daemon] Cycle {run_id} {'completed successfully' if self.running else 'halted by shutdown request'}.")

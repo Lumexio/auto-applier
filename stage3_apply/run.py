@@ -341,6 +341,20 @@ class PlaywrightSession:
     def upload_file(self, field: Any, path: str) -> None:
         self._frame(getattr(field, "frame", 0)).locator(f'[data-aa-file="{field.id}"]').first.set_input_files(str(Path(path).resolve()))
 
+    def upload_via_button(self, action: Any, path: str) -> bool:
+        """Press an upload button and hand the file to the picker it opens (a page that makes its file input only when pressed has none to fill in
+        beforehand). True when the file's name then shows on the page: many sites show it, and it is the only sign a custom control gives."""
+        target = Path(path).resolve()
+        loc = self._frame(getattr(action, "frame", 0)).locator(f'[data-aa-act="{action.id}"]').first
+        with self.page.expect_file_chooser(timeout=5000) as opened:
+            loc.click(timeout=6000)
+        opened.value.set_files(str(target))
+        self.settle(self.settle_ms)
+        try:
+            return self.page.get_by_text(target.name, exact=False).count() > 0
+        except Exception:
+            return False
+
     def settle(self, ms: int = 700) -> None:
         """Let a click's consequences land (navigation, XHR re-render) before the page is read again."""
         try:
@@ -428,9 +442,11 @@ def _handle_recruiter_outreach(
     if not outreach_cfg.get("enabled", False) or not state:
         return
 
+    # With approval (the default) a drafted note is only queued for you; the daily cap then applies when the approved ones are sent (outreach_queue.py).
+    approval = outreach_cfg.get("approval", True)
     max_per_day = outreach_cfg.get("max_per_day", 5)
     daily_count = state.get_outreach_count_today()
-    if daily_count >= max_per_day:
+    if not approval and daily_count >= max_per_day:
         print(f"[Outreach] Daily recruiter outreach limit reached ({daily_count}/{max_per_day}). Pausing.")
         return
 
@@ -459,6 +475,11 @@ def _handle_recruiter_outreach(
                 template=outreach_cfg.get("template"),
                 llm_config=cfg.get("llm"),
             )
+            if approval:
+                import outreach_queue
+
+                print(outreach_queue.hold_for_approval(state, cfg, job_id, job, recruiter, msg))
+                return
             outreach_shot = app_dir / "recruiter_outreach.png"
             channel, out_status = send_recruiter_outreach(
                 session,

@@ -19,14 +19,17 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+import doc_text
 import resume_facts as rf
 
 README = """# Your source of truth
 
 The application bot trusts what is in this folder, and nothing it makes up.
 
-    resumes/      your resume versions: .md or .html (the resume-template layout) or plain Markdown / text.
-                  `python source.py sync` copies them in from your resume-template folder. PDFs are kept for uploading, not read.
+    resumes/      your resume versions: .md or .html (the resume-template layout), plain Markdown / text, Word (.docx) or PDF.
+                  `python source.py sync` copies them in from your resume-template folder. A PDF or Word file that sits beside a text
+                  version of the same name (resume-base.pdf beside resume-base.md) is its printout and is not read a second time.
+                  A PDF or Word file has no headings of its own, so Markdown is the safer source when you have both; PDF needs pypdf.
     experience/   anything else about your work, in your own words (.md): a role, a project, a technology you used.
                   Put a date range on a heading ("## Acme, Backend Engineer (Mar 2019 - Present)") and it counts like a job.
     derived/      written by the program (experience.yaml). Do not edit: change a resume, or state the value in facts.yaml.
@@ -202,9 +205,12 @@ def cmd_check(cfg: dict[str, Any], _args: argparse.Namespace) -> int:
     for u in data.get("unread") or []:
         problems += 1
         print(f"  PROBLEM  could not read {u}")
+    twins = sorted(p.name for p in (root / "resumes").glob("*") if p.suffix.lower() in rf.DOCUMENT_SUFFIXES and doc_text.twin_exists(p))
+    if twins:
+        print(f"  note     {', '.join(twins)} {'is' if len(twins) == 1 else 'are'} the printout of a text version beside {'it' if len(twins) == 1 else 'them'}, so only the text version is read")
     unread_kinds = sorted({p.suffix.lower() for p in (root / "resumes").glob("*") if p.suffix.lower() in rf.UNREAD_SUFFIXES})
     if unread_kinds:
-        print(f"  note     {', '.join(unread_kinds)} files are kept for uploading but not read; the .md / .html versions are the source")
+        print(f"  note     {', '.join(unread_kinds)} files are not read (the old Word format); save them as .docx")
     print("All consistent." if not problems else f"{problems} problem(s).")
     return 1 if problems else 0
 

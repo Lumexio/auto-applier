@@ -1,7 +1,8 @@
 # Setup Guide
 
 How to install, configure and run the AI Auto Job Applier. For what the project is and why it behaves the way it
-does, read the [README](README.md) first.
+does, read the [README](README.md) first; its section [What the MVP includes](README.md#what-the-mvp-includes) lists what is built, the
+properties it keeps and what is left out.
 
 **Contents**
 1. [Requirements](#1-requirements)
@@ -136,6 +137,7 @@ Create `profile.json` in the project folder:
 | `exclusions.companies / keywords / domains` | Never apply to these |
 | `attachments.resume_path` | Absolute path to the résumé PDF that gets uploaded. **Required**: a form that needs a file and has none configured is parked, never submitted without it |
 | `attachments.cover_template` | Cover-letter text for forms that have a cover-letter box |
+| `attachments.resumes`, `attachments.resume_rules` | Optional, for [several resume versions](#several-resume-versions): `{name: path}` of your PDFs, and `{name: [words]}` that make a job title or posting name that kind |
 | `mode` | `autonomous`, `assisted` or `dry_run` (see below). A generated profile starts as `dry_run`; leave it out to follow `stage3.mode` in the config |
 | `max_applications_per_day`, `max_applications_per_domain_per_hour` | Optional overrides of the caps in `config.yaml` |
 
@@ -236,6 +238,7 @@ tell where you live it does nothing.
 | Remote, tied to a country you may work in (`Remote - US`) | kept, or dropped with `remote_authorized: drop` |
 | On-site or hybrid in another city of your own country (`Hybrid - Mexico City`) | dropped unless it is your city; a bare `Mexico City` (no mode stated) is kept |
 | `Hybrid` / `In-Office` with no place named | dropped (you would have to be there, and nothing says where) |
+| A work mode at the end of the **title** (`Backend Engineer - Hybrid`, `Engineer (Remote)`) while the location names none | the title's mode is used as if the location had said it; a title naming both (`(Hybrid or Remote)`), or a mode in the middle of a phrase (`Engineer - Hybrid Cloud Platform`), says nothing |
 | A bare `Remote`, `Distributed`, an unknown city or empty | kept: the fit check judges it |
 | The text says you must live in the United States / Germany / ... and names no place you live | dropped, unless the text also names your country |
 
@@ -261,7 +264,17 @@ stage3:
     per_domain_per_hour: 5
     min_delay_seconds: 5        # random pause between applications
     max_delay_seconds: 15
+  resume_per_job: true          # attach the resume version that fits the job (resume-frontend.pdf for a frontend title); false = always the default
 ```
+
+#### Several resume versions
+
+If you keep more than one PDF, name them `resume-<kind>.pdf` next to the default one (`resume-frontend.pdf` beside `resume-base.pdf`), or list them in
+`profile.json` under `attachments.resumes` (`{"frontend": "C:/path/resume-frontend.pdf"}`). The version that fits the job is uploaded, decided by plain keywords and
+no model: the job **title** first ("Frontend Engineer" picks `frontend`, "Backend Engineer" picks `backend`); only when the title names neither, the posting text,
+and then only if it clearly leans one way (at least 4 keyword hits and twice the other kind's). Anything unclear (a "Full Stack" title, a tie, a kind you
+have no PDF for) gets your default, `attachments.resume_path`, never the other kind. Replace the keywords per kind with `attachments.resume_rules`
+(`{"frontend": ["react", "ui"]}`). `resume_per_job: false` always uploads the default. When a version other than the default is attached, the daemon log says which (`[Stage 3] Resume for this job: frontend version (resume-frontend.pdf)`).
 
 ### The model
 
@@ -366,7 +379,32 @@ agent:
     clean_runs_to_trust: 3      # 0 = only your approval (or a confirmed submission) can trust a site
 ```
 
-Leave `outreach.enabled: false`. Recruiter outreach is disabled until its detection is fixed.
+**Uploads.** The agent attaches your resume (`attachments.resume_path`, or the version that fits the job) and, where a form has a slot for it, `attachments.cover_letter_path`. A form's own file
+fields are filled in directly. A page that makes its file input only when a button is pressed (an "Upload resume" button, a "Drop your resume here or click to browse" zone) is handled too:
+the agent presses the button once and hands the file to the picker that opens, but only for a button that names the resume or the cover letter (on its own or through the
+label beside it), only when the form has no file field of that kind, and only when that file is configured and exists. A button for anything else (a photo, a transcript) is never pressed,
+and a generic required slot gets `attachments.default_path` if you set one. The trace (`steps.jsonl`, the `so_far` of the next step) says which button was pressed and whether the page then showed the file's name.
+
+**Messages to recruiters** are off (`outreach.enabled: false`). When you switch them on, each application that goes through on LinkedIn leads to
+a short note to the recruiter shown on the posting, drafted from your profile (by the local model, or from `outreach.template` when the model
+gives nothing usable). **The note is not sent.** It goes on a list, and nothing leaves your computer until you approve it:
+
+```powershell
+python outreach_queue.py list                          # what is waiting, with ids
+python outreach_queue.py show 3                        # one in full
+python outreach_queue.py approve 3                     # send it as drafted ...
+python outreach_queue.py approve 3 --text "Hi Dana, ..."   # ... or in your own words (at most 300 characters)
+python outreach_queue.py approve --all                 # every waiting one, as drafted
+python outreach_queue.py reject 3                      # never; also takes back an approval that has not been sent
+python outreach_queue.py status                        # on or off, counts, today's cap
+```
+
+The web interface shows the same list under *Needs you* with the text editable (*Send this* / *Don't send*), and the pending list counts it.
+The daemon sends approved messages after its cycle, in the bot's own browser (so it is your LinkedIn account that writes), at most
+`outreach.max_per_day` a day, and exactly the wording you approved. It does not send a message that is longer than 300 characters, to a link that is not a LinkedIn profile, or to
+someone you already contacted; a sign-in page or LinkedIn's invitation limit stops the sending until the next cycle and the message stays approved.
+A recruiter is asked about once (a note you turned down is not drafted again), and no more drafts are written while `outreach.max_waiting` wait for you.
+`outreach.approval: false` sends without asking; leave it as it is.
 
 ## 5. Log in to the sites you use
 
@@ -415,6 +453,7 @@ Each job gets a folder, `applications/<job>/`:
 | `fit.json` | The fit assessment: score, verdict, deal-breakers (with the quote) |
 | `trace/` | For jobs the agent handled: `steps.jsonl` and one screenshot per step |
 | `probation.json` | Written when a site is on probation: why it was held and how to release it |
+| `failure.png`, `failure.json` | Written when an application went wrong: what the page looked like and what was happening. The web interface shows them next to the failed job |
 
 Check that names, contact details, the résumé upload and the answers are right. Then look at the overall state:
 
@@ -488,11 +527,39 @@ How outcomes are recorded:
 | Status | Meaning |
 |---|---|
 | `submitted` | The site confirmed it (confirmation text or URL seen) |
-| `unconfirmed` | Submit was clicked but no confirmation appeared. **Never retried automatically**; check the site |
+| `unconfirmed` | Submit was clicked but no confirmation appeared. **Never sent again automatically**. On LinkedIn and Handshake the bot looks at the posting again later (below); anywhere else check the site |
 | `needs_review` | Parked: needs an answer, the form rejected the submit, probation, or an interrupted run |
 | `failed` | Error; retried up to `stage3.max_attempts` |
 | `skipped` | A CAPTCHA challenge on screen (the reason names what was seen), login wall, closed posting, or a poor fit. Closed and not-a-fit are permanent; a CAPTCHA skip is retried later |
 | `duplicate` | The site says it was already applied to |
+
+#### A second look at `unconfirmed` applications
+
+LinkedIn and Handshake remember what you applied to: a posting you applied to shows "Applied 2 days ago" and "See application status".
+So after each cycle the daemon opens the oldest `unconfirmed` applications on those two sites and reads the page. When it says you
+applied, the application is recorded as `submitted` (the note says which words were seen). Nothing else changes: the bot never clicks,
+fills in or sends anything on that look, never answers a CAPTCHA, and a late confirmation does not make the site trusted
+(probation is unchanged).
+
+A look that proves nothing is written down and not held against the application: a redirect to a sign-in page (the log asks you to
+sign in again with `python daemon.py --login <url>`, and that site's other postings wait for the next cycle), a CAPTCHA, or a page that
+ended up on a different posting. A page that is fine but does not say you applied counts as one miss. After `max_checks` misses the
+application is left to you.
+
+```yaml
+reverify:
+  enabled: true
+  sites: [linkedin, handshake]   # sites that remember applications; on any other site a second look proves nothing
+  min_age_hours: 6               # time the site gets to show the application before the first look
+  recheck_hours: 24              # between two looks at the same posting
+  max_checks: 4                  # looks that found the posting without a sign of an application
+  max_per_cycle: 5
+```
+
+```powershell
+python reverify.py status    # each unconfirmed application, how often it was looked at and what the last look found
+python reverify.py run       # look now (stop the daemon first: both use the bot's browser)
+```
 
 ### 7.4 Fit vetoes: check what the models skipped
 
@@ -555,6 +622,18 @@ After a crash, anything that was mid-application is parked as `needs_review` rat
 
 > After changing code or `config.yaml`, restart the daemon: `setup.bat -StopAll`, then `setup.bat -All -Background`.
 
+**The daemon tells the dashboards when it needs you.** While it runs it keeps a small `status.json` beside `state.db` (written every few
+seconds, replaced in one step, removed when the daemon exits cleanly). It holds the daemon's process id, which config files it loaded
+(a fingerprint per section, not the content) and which models it has stopped asking. The terminal dashboard and the web interface read it,
+and only trust it while that process still holds the lock. They show two kinds of warning:
+
+* **"config edited since the daemon started (llm, stage3)"**: the daemon reads `config.yaml` and `config.local.yaml` once, at start, so it
+  is still running the old settings. The warning names the sections that differ and says how to restart.
+* **"model ... is not answering"**: that model failed twice in a row and is left alone for two minutes (see "A model that keeps failing is
+  left alone"); the line counts down and its jobs use the main model meanwhile. It disappears when the model answers again.
+
+Nothing else uses the file, and a failed write is ignored, so it can never stop a cycle.
+
 ## 9. REST API and Langflow (optional)
 
 ### REST API
@@ -608,6 +687,7 @@ and asks Ollama which models are loaded; it never writes and never touches the d
 | Panel | Shows |
 |---|---|
 | Top line | whether the daemon is running (checked from its lock and process, never by signalling it), which models Ollama has loaded and how much GPU memory they use, the mode, and when the next cycle starts |
+| Warnings (only when there is one) | under the top line, from the daemon's `status.json`: the config was edited after the daemon started (and how to restart it), or a model has been stopped for repeated failures and when it is asked again |
 | Today | submissions in the last 24 hours against `stage3.rate_limit.global_per_day`, today's outcomes, all-time totals and a 7-day sparkline |
 | Latest cycle | the funnel: scraped, what each filter removed, what reached stage 3, and what happened to it |
 | Models | what is loaded now, and each configured role (`models:`) with whether its model is loaded and which tasks use it |
@@ -634,11 +714,12 @@ know it runs, it may be running as another user or in WSL (the process check onl
 
 `gui.bat` (or `python -m gui --open`) serves a page at http://127.0.0.1:8765/ and opens it. `setup.bat -All -Background` starts
 it with the other services, `setup.bat -Gui` opens it (starting it if needed), `-StopAll` stops it, and the desk opens it in your
-browser at login unless you pass `-NoGui`. It reads the same files the daemon writes and changes only what you press.
+browser at login unless you pass `-NoGui`. It reads the same files the daemon writes and changes only what you press. A banner under the
+header shows the same two warnings as the terminal dashboard (config edited since the daemon started; a model that is not answering).
 
 | Tab | What it is for |
 |---|---|
-| **Needs you** | **Questions the forms asked**: type an answer (or pick one of the form's options) and save: it is kept for every future form that asks the same, and the jobs that were waiting on it are tried again. A draft from your resumes and notes is already in the box with the lines it rests on and whether a second model confirmed it; an answer that names the company is saved for that company only. "Skip these jobs" ends them for good instead. **Fit models disagree**: *Apply anyway* queues the posting and no model can veto it; *Skip for good* ends it. **Sites on probation**: the filled-in forms (click a picture to see it whole, with the answers given and the questions left blank); *Trust* applies to the jobs held back and every later one at that kind of site. **Apply yourself** / **Check by hand** / **Other parked jobs**: open the posting, then say *I applied*, *try again* or *skip* |
+| **Needs you** | **Messages to recruiters** (when outreach is on): the drafted note, editable; *Send this* approves it for the daemon, *Don't send* turns it down. **Questions the forms asked**: type an answer (or pick one of the form's options) and save: it is kept for every future form that asks the same, and the jobs that were waiting on it are tried again. A draft from your resumes and notes is already in the box with the lines it rests on and whether a second model confirmed it; an answer that names the company is saved for that company only. "Skip these jobs" ends them for good instead. **Fit models disagree**: *Apply anyway* queues the posting and no model can veto it; *Skip for good* ends it. **Sites on probation**: the filled-in forms (click a picture to see it whole, with the answers given and the questions left blank); *Trust* applies to the jobs held back and every later one at that kind of site. **Apply yourself** / **Check by hand** / **Other parked jobs**: open the posting, then say *I applied*, *try again* or *skip* |
 | **Not confirmed** | Applications that were sent without a confirmation page (the bot never retries these on its own, so nothing is applied twice). Check, then say it went through, try again, or skip |
 | **Failed** | The bot could not finish them; try again now or give up |
 | **Saved answers** | Everything the bot may say, editable; add one before a form asks, or forget a wrong one |
@@ -666,10 +747,18 @@ python source.py check     # do your versions agree with each other, and with th
 ```
 
 ```
-me/resumes/      resume-backend.md, resume-frontend.md, resume-base.html ...   (what `sync` copies; PDFs are kept for uploading, not read)
+me/resumes/      resume-backend.md, resume-frontend.md, resume-base.html, resume-old.docx, resume-other.pdf ...   (what `sync` copies)
 me/experience/   notes in your own words (.md); a heading with a date range ("## Acme, Backend (Mar 2019 - Present)") counts like a job
 me/derived/      experience.yaml, written by the program: every number with where it came from. Do not edit it.
 ```
+
+**Word and PDF files are read too.** A `.docx` is unpacked with the standard library; a `.pdf` needs `pypdf` (in `requirements.txt`; `python -m pip install pypdf`). Neither format
+has Markdown's headings, so the reader restores only two things: a line that is nothing but a section name ("Experience", "WORK HISTORY", "Skills:") becomes a heading, and
+a leading bullet glyph becomes a dash; Word's own heading and list styles are used too. Because of that, Markdown stays the safer source when you have both, and a PDF or Word file
+that sits beside a text version with the same name (`resume-base.pdf` beside `resume-base.md`) is that version's printout and is **not read a second time** (so no job is counted twice).
+A file with almost no text (a scan), whose fonts come out as symbols, that is password-protected, or a PDF when `pypdf` is missing is listed by `python source.py check` with the reason;
+nothing is guessed from it. The old binary `.doc` format is not read: save it as `.docx`. Reading a PDF can split a job's title and its dates onto different lines; where a company
+cannot be told, the employer counts stay unclaimed rather than guessed (`source.py check` says so).
 
 How a number is worked out, in order:
 
@@ -776,7 +865,10 @@ into system RAM slows each call dramatically.
 | `.browser_profile/` | The bot's browser profile **with logged-in sessions** | **Yes, never share or commit** |
 | `.api_token` | REST API bearer token | Yes |
 | `.daemon.pid`, `.api.pid`, `.langflow.pid`, `.gui.pid` | Process ids for the launcher | No |
-| `profile.json`, `facts.yaml` | Your personal data | Yes |
+| `status.json` | What the running daemon tells the dashboards: process id, config fingerprints, stopped models (removed when it exits cleanly) | No |
+| `profile.json`, `facts.yaml`, `config.local.yaml` | Your personal data and settings | Yes |
+| `me/` | Your resume versions and notes (`resumes/`, `experience/`) and what is computed from them (`derived/`) | **Yes** |
+| `.venv-tui/` | The terminal dashboard's own small environment, created by `tui.bat` | No |
 
 If you put the project under version control, ignore all of the above.
 
@@ -791,7 +883,8 @@ python -m pytest tests -q
 python run_tests.py
 ```
 
-The suite (294 tests with pytest; `run_tests.py` runs 293, skipping the one that needs the dashboard environment) includes real-browser tests against a fake application server. It takes a few minutes.
+The suite has 505 tests under pytest and takes about five minutes. It includes real-browser tests against a fake application server. `run_tests.py` is a
+dependency-free runner of the main suites (it does not need pytest).
 Tests that need a Playwright browser are skipped if none is installed. The suite is built around local fake
 servers and stubbed models, so it does not need Ollama or an internet connection.
 
@@ -809,8 +902,12 @@ servers and stubbed models, so it does not need Ollama or an internet connection
 | "Another daemon instance is actively running" | A daemon is already running (`setup.bat -Status`). If it is not, the lock is stale: `setup.bat -StopAll` |
 | LinkedIn / Handshake return nothing | Session expired. Run `python daemon.py --login <url>` again |
 | A site is always `unsupported` / parked | Open `applications/<job>/trace/` and read the last step and screenshot. Usually a CAPTCHA, a login wall, a button the agent will not press, or a site that redirects elsewhere (add trusted hosts to `agent.allowed_domains`) |
-| An application shows `unconfirmed` | Submit was clicked but no confirmation appeared. Check the site by hand; the bot will not retry it |
+| An application shows `unconfirmed` | Submit was clicked but no confirmation appeared. LinkedIn and Handshake postings are looked at again by the bot (`python reverify.py status` says when); for any other site check by hand. The bot will not send it again |
 | Firefox profile locked | Close any Firefox using `.browser_profile`; the launcher normally clears stale locks |
+| A dashboard says "config edited since the daemon started" | You changed `config.yaml` or `config.local.yaml` after the daemon loaded it, so it still runs the old settings. Restart: `setup.bat -StopAll`, then `setup.bat -All -Background` |
+| A dashboard says a model "is not answering" | That model failed twice in a row (Ollama restarting, out of memory, swapped out). It is asked again after the cool-down shown, and its jobs use the main model meanwhile. If it keeps happening, check `ollama ps` and the memory the model needs |
+| `setup.bat -All` opened three ordinary windows instead of one | Windows Terminal (`wt.exe`) is not installed; the desk falls back to plain windows. Use `setup.bat -All -Background` if you want nothing opened |
+| The wrong resume version was attached, or always the default | The title decides: "Full Stack", a tie, or a kind with no `resume-<kind>.pdf` keeps the default on purpose. The daemon log line `[Stage 3] Resume for this job:` appears only when a non-default version was used. `stage3.resume_per_job: false` turns it off |
 
 Logs: `daemon.log` (or `setup.bat -Logs`). Database events: `select * from events order by id desc limit 20;`
 in `state.db`.

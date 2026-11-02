@@ -224,6 +224,12 @@ function needsTab() {
   const total = ib.counts.needs_you;
   if (!total) out.push(h("div", { class: "empty" }, h("div", { class: "title" }, "Nothing is waiting for you."), "New questions and decisions appear here as the daemon meets them."));
 
+  if (ib.outreach.length) {
+    out.push(h("h2", {}, `Messages to recruiters (${ib.outreach.length})`),
+      h("p", { class: "hint" }, "Drafted after an application went through. Nothing is sent until you press Send; change the wording first if you like. The daemon sends approved ones after its next cycle" +
+        (ib.counts.outreach_approved ? ` (${ib.counts.outreach_approved} already approved and on their way).` : ".")));
+    ib.outreach.forEach((m) => out.push(outreachCard(m)));
+  }
   if (ib.questions.length) {
     out.push(h("h2", {}, `Questions the forms asked (${ib.questions.length})`),
       h("p", { class: "hint" }, "The bot never guesses. Answer once and it is used for every future form that asks the same thing; the jobs waiting on it are tried again."));
@@ -314,6 +320,23 @@ function questionCard(x) {
     }, "danger"),
     h("span", { class: "muted small" }, "Saving also tries the waiting jobs again.")));
   return h("div", { class: "card" }, kids);
+}
+
+function outreachCard(m) {
+  const id = "outreach" + m.id;
+  if (!(id in state.drafts)) state.drafts[id] = m.text;
+  const area = h("textarea", { rows: 4, "aria-label": "Message to " + m.recruiter }, state.drafts[id]);
+  const count = h("span", { class: "muted small" });
+  const recount = () => { state.drafts[id] = area.value; count.textContent = `${area.value.length} of ${m.limit} characters`; count.style.color = area.value.length > m.limit ? "var(--bad)" : ""; };
+  area.addEventListener("input", recount);
+  recount();
+  return h("div", { class: "card" },
+    h("div", { class: "row" }, h("div", { class: "grow" }, h("span", { class: "title" }, m.recruiter), h("span", { class: "muted" }, ` · ${m.company || "?"}${m.title ? " · " + m.title : ""}`), " ", link(m.profile, "profile ↗"))),
+    area,
+    h("div", { class: "actions" },
+      btn("Send this", async (b) => { const done = await act({ action: "outreach", id: m.id, decision: "send", text: area.value }, b); if (done) delete state.drafts[id]; }, "primary"),
+      btn("Don't send", async (b) => { const done = await act({ action: "outreach", id: m.id, decision: "reject" }, b); if (done) delete state.drafts[id]; }, "danger"),
+      count));
 }
 
 function fitCard(f) {

@@ -544,6 +544,31 @@ def parked_for_you(root: str | Path, limit: int = 100, cfg: dict[str, Any] | Non
     return out
 
 
+@dataclass
+class OutreachRow:
+    """A drafted message to a recruiter that waits for your OK (outreach_queue.py)."""
+    id: int
+    recruiter: str
+    company: str
+    title: str
+    text: str
+
+
+def outreach_waiting(root: str | Path, limit: int = 100, cfg: dict[str, Any] | None = None) -> list[OutreachRow]:
+    root = Path(root)
+    cfg = cfg if cfg is not None else load_config(root)
+    db = root / str((cfg.get("daemon") or {}).get("state_db", "state.db"))
+    try:
+        conn = _connect(db)
+    except sqlite3.Error:
+        return []
+    try:
+        rows = _rows(conn, "SELECT id, recruiter_name, company, job_title, message_text FROM outreach_queue WHERE state = 'awaiting' ORDER BY created_at, id LIMIT ?", (limit,))
+    finally:
+        conn.close()
+    return [OutreachRow(r["id"], r["recruiter_name"], r["company"] or "", r["job_title"] or "", r["message_text"]) for r in rows]
+
+
 def job_detail(root: str | Path, job_id: str) -> dict[str, Any]:
     """Everything known about one job: the application row, the posting, the fit verdict, the answers and the agent's steps."""
     root = Path(root)

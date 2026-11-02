@@ -90,6 +90,10 @@ def build(dest: Path | None = None) -> Path:
         add_job("f2", "Software Engineer", "Tailspin", "linkedin", "failed", 500, None, "linkedin: no apply button found on job posting")
         add_job("f3", "Platform Engineer", "Wingtip", "custom", "failed", 520, None, "custom: no submit button found")
 
+        store.queue_outreach("x1", "Contoso Labs", "Python Developer", "Dana Whitfield", "https://www.linkedin.com/in/dana-whitfield-demo",
+                             "Hi Dana, I applied for the Python Developer role at Contoso Labs. With my background in Python, I'd love to connect. Best, Alex.")
+        store.queue_outreach("x2", "Adatum", "Backend Engineer", "Sam Okafor", "https://www.linkedin.com/in/sam-okafor-demo",
+                             "Hi Sam, I applied for the Backend Engineer role at Adatum and would love to connect about the team. Best, Alex.")
         store.put_answer("are you legally authorized to work in mexico", "Are you legally authorized to work in Mexico?", "Yes", "user")
         store.put_answer("why do you want to join northwind@northwind", "Why do you want to join Northwind?  [northwind only]", "I like logistics problems.", "user")
         store.conn.commit()

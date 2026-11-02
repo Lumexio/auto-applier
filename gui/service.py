@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import fit_review
+import outreach_queue
 from form_questions import WHOLE_LIST_MAX, normalize_key
 from sites import DEFAULT_PROBATION
 from state import StateStore
@@ -149,23 +150,32 @@ class Desk:
         with self.reader() as s:
             if s is None:
                 return {"db": False, "questions": [], "fit": [], "probation": [], "apply_by_hand": [], "verify": [], "other": [],
-                        "unconfirmed": [], "failed": [], "counts": {}}
+                        "unconfirmed": [], "failed": [], "outreach": [], "counts": {}}
             questions = self._questions(s)
             fit = self._fit(s)
             probation = self._probation(s)
             parked = self._parked(s)
             unconfirmed = self._by_status(s, "unconfirmed")
             failed = self._by_status(s, "failed")
+            outreach = self._outreach(s)
+            outreach_approved = len(s.outreach_queue_rows("approved"))
         by_kind = {k: [p for p in parked if p["kind"] == k] for k in ("apply", "verify", "other")}
         disputed = [f for f in fit if f["where"] == "disputed"]
         counts = {
             "questions": len(questions), "fit": len(disputed), "probation": sum(len(p["jobs"]) for p in probation),
             "apply_by_hand": len(by_kind["apply"]), "verify": len(by_kind["verify"]), "other": len(by_kind["other"]),
-            "unconfirmed": len(unconfirmed), "failed": len(failed),
+            "unconfirmed": len(unconfirmed), "failed": len(failed), "outreach": len(outreach), "outreach_approved": outreach_approved,
         }
-        counts["needs_you"] = sum(counts[k] for k in ("questions", "fit", "apply_by_hand", "verify", "other")) + len(probation)
+        counts["needs_you"] = sum(counts[k] for k in ("questions", "fit", "apply_by_hand", "verify", "other", "outreach")) + len(probation)
         return {"db": True, "questions": questions, "fit": fit, "probation": probation, "apply_by_hand": by_kind["apply"],
-                "verify": by_kind["verify"], "other": by_kind["other"], "unconfirmed": unconfirmed, "failed": failed, "counts": counts}
+                "verify": by_kind["verify"], "other": by_kind["other"], "unconfirmed": unconfirmed, "failed": failed, "outreach": outreach, "counts": counts}
+
+    @staticmethod
+    def _outreach(s: StateStore) -> list[dict[str, Any]]:
+        """Drafted messages to recruiters that wait for your OK."""
+        return [{"id": r["id"], "job_id": r["job_id"], "title": _clip(r["job_title"], 120), "company": _clip(r["company"], 80),
+                 "recruiter": _clip(r["recruiter_name"], 80), "profile": safe_url(r["recruiter_url"]), "text": r["message_text"], "limit": outreach_queue.MAX_CHARS}
+                for r in s.outreach_queue_rows("awaiting")]
 
     @staticmethod
     def _job(r: Any) -> dict[str, Any]:
@@ -449,6 +459,30 @@ class Desk:
         with self.writer() as s:
             s.revoke_site(site)
         return {"ok": True, "message": f"'{site}' is back on probation: filled in and reviewed, not submitted."}
+
+    def _do_outreach(self, args: dict[str, Any]) -> dict[str, Any]:
+        """A drafted message to a recruiter: ``send`` approves it (the text as you left it; the daemon sends it after its next cycle), ``reject`` never sends it."""
+        try:
+            queue_id = int(args.get("id"))
+        except (TypeError, ValueError):
+            raise ActionError("Which message?") from None
+        decision = args.get("decision")
+        if decision not in ("send", "reject"):
+            raise ActionError("Choose send or reject.")
+        with self.writer() as s:
+            if decision == "reject":
+                if not s.reject_outreach(queue_id):
+                    raise ActionError("That message is not waiting any more. Refresh the page.")
+                return {"ok": True, "message": "It will not be sent."}
+            try:
+                text = outreach_queue.check_text(self._text(args, "text", 2000))
+            except ValueError as e:
+                raise ActionError(str(e)) from None
+            if not s.approve_outreach(queue_id, text):
+                raise ActionError("That message is not waiting any more. Refresh the page.")
+        enabled = bool((self.config().get("outreach") or {}).get("enabled"))
+        return {"ok": True, "message": "Approved. The daemon sends it after its next cycle." if enabled
+                else "Approved, but outreach.enabled is false in the config, so nothing is sent until you switch it on and restart the daemon."}
 
     def _do_job(self, args: dict[str, Any]) -> dict[str, Any]:
         """What happened to a parked, unconfirmed or failed posting: you applied yourself, try it again, or never apply."""

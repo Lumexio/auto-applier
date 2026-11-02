@@ -19,6 +19,8 @@ Pages (all under http://127.0.0.1:<port>):
   /li/job/1          a LinkedIn-like job page whose Apply button opens the employer site in a new tab
   /li/job/nobutton|closed|nothing    LinkedIn-like pages the LinkedIn script finds no apply button on: a link it has no selector for,
                      a closed posting, and a page with nothing to click
+  /li/job/applied|lookalike|walled|elsewhere    the same posting seen again after an unconfirmed application: one that says you applied, one that only
+                     has look-alike words, one that redirects to a sign-in page (/uas/login), one that redirects to a different posting
   /chain/N, /loop    flows that never finish
 """
 
@@ -181,6 +183,13 @@ class FakeATS:
             "/apply/refer": lambda: layout("Apply", "<h1>Apply: Senior Backend Engineer</h1>" + self._single("/apply/refer/submit", referral=True)),
             "/embed/apply/1": lambda: layout("Apply", "<h1>Apply: Senior Backend Engineer</h1>" + self._single("/embed/apply/1/submit")),
             "/apply/shadow": lambda: self._shadow(),
+            # A custom file picker: there is no <input type=file> until a control is pressed, and the page makes one then.
+            "/apply/picker": lambda: layout("Apply", "<h1>Apply: Senior Backend Engineer</h1>" + self._picker('<button type="button" onclick="pickFile()">Upload resume</button>')),
+            "/apply/picker/generic": lambda: layout("Apply", "<h1>Apply: Senior Backend Engineer</h1>" + self._picker('<button type="button" onclick="pickFile()">Upload</button>')),
+            "/apply/picker/dropzone": lambda: layout("Apply", "<h1>Apply: Senior Backend Engineer</h1>" + self._picker(
+                '<div class="dropzone" role="presentation" style="border:1px dashed #888;padding:12px" onclick="pickFile()">Drop your file here, or click to browse</div>')),
+            "/apply/picker/photo": lambda: layout("Apply", "<h1>Apply: Senior Backend Engineer</h1>" + self._picker(
+                '<button type="button" onclick="pickFile()">Upload photo</button>', heading="Profile photo (optional)")),
             "/apply/strict": lambda: layout("Apply", "<h1>Apply: Senior Backend Engineer</h1>" + self._strict()),
             "/li/job/1": lambda: layout("Senior Backend Engineer | LinkedIn", (
                 "<h1>Senior Backend Engineer</h1><p>Acme</p>"
@@ -191,9 +200,19 @@ class FakeATS:
             "/li/job/closed": lambda: layout("Senior Backend Engineer | LinkedIn", (
                 "<h1>Senior Backend Engineer</h1><p>Acme</p><p>No longer accepting applications</p>")),
             "/li/job/nothing": lambda: layout("Senior Backend Engineer | LinkedIn", "<h1>Senior Backend Engineer</h1><p>Acme</p>"),
+            "/li/job/applied": lambda: layout("Senior Backend Engineer | LinkedIn", (
+                "<h1>Senior Backend Engineer</h1><p>Acme</p><p>Applied 2 days ago</p><a href=\"/apply/1\">See application status</a>")),
+            "/li/job/lookalike": lambda: layout("Senior Backend Engineer | LinkedIn", (
+                "<nav><a href=\"/me/jobs\">Applied jobs</a></nav><h1>Senior Backend Engineer</h1><p>Applied Materials partner</p>"
+                "<p>Once your application submitted is reviewed you will hear from us. Applicants who applied earlier are considered first.</p>")),
+            "/uas/login": lambda: layout("Sign in | LinkedIn", "<h1>Sign in</h1><form action=\"/uas/login-submit\" method=\"post\"><input name=\"session_key\"></form>"),
         }.get(path)
         if page:
             return 200, page(), None
+        if path == "/li/job/walled":                           # a signed-out browser is sent to the sign-in page
+            return 302, "", "/uas/login"
+        if path == "/li/job/elsewhere":                        # a posting that now redirects to a different one
+            return 302, "", "/li/job/applied"
         if path.startswith("/jobs/login/"):                    # more sign-in walls: one per job, so a run of them can be told apart
             return self.get("/jobs/login")
         if path.startswith("/chain/"):
@@ -268,6 +287,22 @@ class FakeATS:
             + field("Employee ID", "employee_id") + '<button type="submit">Next</button></form>'      # the site requires it, the form never says so
         )
 
+    @staticmethod
+    def _picker(control: str, heading: str = "Resume/CV *") -> str:
+        script = ("<script>function pickFile(){window.picks=(window.picks||0)+1;const i=document.createElement('input');i.type='file';"
+                  "i.onchange=()=>{const f=i.files[0];document.getElementById('picked').textContent=f.name;"
+                  "document.getElementById('resume_name').value=f.name;document.getElementById('resume_size').value=f.size;};i.click();}</script>")
+        return (
+            '<form method="post" action="/apply/picker/submit">'
+            + field("First name", "first_name", required=True)
+            + field("Email", "email", "email", True)
+            + f'<div class="f"><label>{heading}</label>{control} <span id="picked"></span>'
+              '<input type="hidden" name="resume_name" id="resume_name"><input type="hidden" name="resume_size" id="resume_size"></div>'
+            + "".join(QUESTIONS)
+            + '<div class="f"><label><input type="checkbox" name="consent" value="1" required> I agree to the privacy policy *</label></div>'
+            + '<button type="submit">Submit Application</button></form>' + script
+        )
+
     def _shadow(self) -> str:
         script = """<script>
 class ApplyForm extends HTMLElement { connectedCallback() { const r = this.attachShadow({mode: 'open'}); r.innerHTML = `
@@ -316,6 +351,13 @@ customElements.define('apply-form', ApplyForm);</script>"""
                 return 200, layout("Apply", '<div role="alert" class="error">Please complete all required fields.</div>' + self._single(path.replace("/submit", "") + "/submit")), None
             self.applications.append({"first_name": t("first_name"), "email": t("email"), "linkedin": t("linkedin"), "auth": t("auth"),
                                       "spons": t("spons"), "years": t("years"), "resume_name": resume_name, "resume_size": len(resume_bytes), "via": path})
+            return 200, layout("Application received", THANKS), None
+        if path == "/apply/picker/submit":
+            if not all([t("first_name"), t("email"), t("resume_name"), t("auth"), t("spons"), t("years"), t("consent")]):
+                return 200, layout("Apply", '<div role="alert" class="error">Please complete all required fields.</div>' + self._picker(
+                    '<button type="button" onclick="pickFile()">Upload resume</button>')), None
+            self.applications.append({"first_name": t("first_name"), "email": t("email"), "auth": t("auth"), "spons": t("spons"), "years": t("years"),
+                                      "resume_name": t("resume_name"), "resume_size": int(t("resume_size") or 0), "via": path})
             return 200, layout("Application received", THANKS), None
         if path == "/apply/shadow/submit":
             if not (t("first_name") and t("email") and t("auth")):

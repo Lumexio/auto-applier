@@ -458,6 +458,59 @@ class StateStore:
         cur = self.conn.execute("SELECT COUNT(*) FROM recruiter_outreach WHERE status IN ('sent', 'drafted')")
         return int(cur.fetchone()[0])
 
+    # ---- Messages to recruiters that wait for your OK (outreach_queue.py) -------------
+
+    def queue_outreach(self, job_id: str, company: str, job_title: str, recruiter_name: str, recruiter_url: str, text: str) -> int | None:
+        """Put a drafted message in the queue. None when this recruiter already has one (waiting, approved, turned down or sent) or was contacted before:
+        you are asked about a recruiter once."""
+        if not recruiter_url or self.has_recruiter_been_contacted(recruiter_url):
+            return None
+        if self.conn.execute("SELECT 1 FROM outreach_queue WHERE recruiter_url = ?", (recruiter_url,)).fetchone():
+            return None
+        cur = self.conn.execute(
+            """
+            INSERT INTO outreach_queue(job_id, company, job_title, recruiter_name, recruiter_url, drafted_text, message_text, state, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'awaiting', ?)
+            """,
+            (job_id, company, job_title, recruiter_name, recruiter_url, text, text, utc_now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def outreach_queue_rows(self, *states: str) -> list[dict[str, Any]]:
+        marks = ",".join("?" for _ in states)
+        cur = self.conn.execute(f"SELECT * FROM outreach_queue WHERE state IN ({marks}) ORDER BY created_at, id", states)
+        return [dict(row) for row in cur.fetchall()]
+
+    def outreach_queue_row(self, queue_id: int) -> dict[str, Any] | None:
+        row = self.conn.execute("SELECT * FROM outreach_queue WHERE id = ?", (queue_id,)).fetchone()
+        return dict(row) if row else None
+
+    def approve_outreach(self, queue_id: int, text: str | None = None) -> bool:
+        """Send this message (``text`` is your own wording instead of the draft). Only a message that is waiting can be approved."""
+        cur = self.conn.execute(
+            "UPDATE outreach_queue SET state = 'approved', message_text = COALESCE(?, message_text), decided_at = ? WHERE id = ? AND state = 'awaiting'",
+            (text, utc_now(), queue_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def reject_outreach(self, queue_id: int) -> bool:
+        """Never send this one (also takes back an approval the daemon has not acted on yet)."""
+        cur = self.conn.execute(
+            "UPDATE outreach_queue SET state = 'rejected', decided_at = ? WHERE id = ? AND state IN ('awaiting','approved')", (utc_now(), queue_id)
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def finish_outreach(self, queue_id: int, state: str, outcome: str) -> bool:
+        """The daemon's last word on an approved message: ``sent``, or ``not_sent`` with the reason. Only an approved message can finish."""
+        cur = self.conn.execute(
+            "UPDATE outreach_queue SET state = ?, outcome = ?, finished_at = ? WHERE id = ? AND state = 'approved'", (state, outcome, utc_now(), queue_id)
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
     # ---- Answer bank & questions waiting for the user -------------------------
 
     def get_answer(self, question_key: str) -> str | None:
@@ -606,6 +659,49 @@ class StateStore:
         The caller must have checked that an ``unconfirmed`` attempt did not go through: this would apply a second time."""
         marks = ",".join("?" for _ in self._DECIDABLE)
         cur = self.conn.execute(f"DELETE FROM applications WHERE job_id = ? AND status IN ({marks})", (job_id, *self._DECIDABLE))
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    # ---- Looking again at unconfirmed applications (reverify.py) -----------------
+
+    def unconfirmed_with_checks(self) -> list[dict[str, Any]]:
+        """Every unconfirmed application with its posting and how it has been re-checked so far, oldest first.
+
+        ``misses`` counts the looks that found the posting but no sign of an application; looks that could not see the posting
+        (signed out, a CAPTCHA, an error) are not held against it and do not delay the next one (``last_look``)."""
+        cur = self.conn.execute(
+            """
+            SELECT j.id AS job_id, j.title, j.company, j.apply_url, j.source, a.ats, a.started_at, a.error_message,
+                   (SELECT COUNT(*) FROM reverify_checks c WHERE c.job_id = j.id AND c.result = 'not_seen') AS misses,
+                   (SELECT MAX(c.checked_at) FROM reverify_checks c WHERE c.job_id = j.id AND c.result IN ('not_seen','error')) AS last_look,
+                   (SELECT c.result || ': ' || COALESCE(c.note, '') FROM reverify_checks c WHERE c.job_id = j.id ORDER BY c.id DESC LIMIT 1) AS last_result
+              FROM applications a JOIN jobs j ON j.id = a.job_id
+             WHERE a.status = 'unconfirmed'
+             ORDER BY a.started_at, j.id
+            """
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+    def record_reverify_check(self, job_id: str, result: str, note: str = "") -> None:
+        self.conn.execute(
+            "INSERT INTO reverify_checks(job_id, checked_at, result, note) VALUES (?, ?, ?, ?)", (job_id, utc_now(), result, note[:300])
+        )
+        self.conn.commit()
+
+    def confirm_unconfirmed(self, job_id: str, evidence: str) -> bool:
+        """A later look at the posting shows it was applied to: the application is ``submitted`` after all.
+
+        Only an ``unconfirmed`` row changes (a parked, failed or skipped one stays what it is), and nothing about the site's trust does:
+        a confirmation seen after the fact says the application went through, not that the next one on that site can be left unwatched."""
+        now = utc_now()
+        cur = self.conn.execute(
+            """
+            UPDATE applications
+               SET status = 'submitted', submitted_at = COALESCE(submitted_at, started_at, ?), finished_at = ?, error_message = ?
+             WHERE job_id = ? AND status = 'unconfirmed'
+            """,
+            (now, now, ("confirmed on a later look: " + evidence)[:300], job_id),
+        )
         self.conn.commit()
         return cur.rowcount > 0
 
