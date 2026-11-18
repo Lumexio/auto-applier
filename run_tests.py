@@ -324,6 +324,7 @@ def main():
         ("Custom File Pickers", "test_p18_picker"),
         ("Re-checking Unconfirmed Applications", "test_p19_reverify"),
         ("Recruiter Messages Wait for Your OK", "test_p20_outreach_queue"),
+        ("Standing Instructions (agent-instructions.md)", "test_p21_instructions"),
         ("Repository Hygiene (public repo)", "test_repo_hygiene"),
         ("Documentation (links and commands the guides name)", "test_docs"),
         ("Multi-user Readiness (config layers, profile, licence)", "test_p8_multiuser"),

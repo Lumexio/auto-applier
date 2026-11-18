@@ -1,0 +1,15 @@
+<!-- Copy this to me/agent-instructions.md (note the .md) and edit. It steers HOW the bot writes and chooses; it can never make it claim more than your
+     resumes and facts say. Text here is cut after about 1500 characters, so keep it short. Fictional example below. -->
+
+Write in plain first person, short sentences, no buzzwords.
+Never use the word "passionate". Keep every answer under 60 words unless the form asks for more.
+Prefer concrete results over adjectives.
+
+## essays
+Open with what the team builds, not with me. Two short paragraphs at most.
+
+## outreach
+One friendly sentence about why the role fits; do not ask for a referral.
+
+## agent
+When two buttons both look right, prefer the one that keeps me on the company's own site.

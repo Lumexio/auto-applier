@@ -26,6 +26,7 @@ from typing import Any, Callable
 
 import doc_text
 from form_questions import Question
+import instructions
 from llm_client import LLMError, chat_json, context_budget, estimate_tokens
 from resume_facts import source_files
 
@@ -327,12 +328,13 @@ def draft_answer(
     options = f"\nOPTIONS: {' | '.join(o[:60] for o in q.options[:15])}" if q.options else ""
     facts_part = facts_text[:700]
     head = f"JOB: {job_line}\n\nFACTS:\n{facts_part}\n\nQUESTION: {q.label[:300]}{options}\nWORDS: {words}\n\nEVIDENCE:\n"
-    room = context_budget(draft_cfg) - estimate_tokens(_DRAFT_SYSTEM) - estimate_tokens(head) - max_tokens - 20
+    system = instructions.system(_DRAFT_SYSTEM, "essays" if essay else "answers")
+    room = context_budget(draft_cfg) - estimate_tokens(system) - estimate_tokens(head) - max_tokens - 20
     shown, evidence_text = _fit_evidence(found, room)
     if not shown:
         raise NoEvidence("the evidence does not fit the model's context window")
 
-    reply = chat(draft_cfg, _DRAFT_SYSTEM, head + evidence_text, max_tokens=max_tokens, temperature=0.2 if essay else 0.0)
+    reply = chat(draft_cfg, system, head + evidence_text, max_tokens=max_tokens, temperature=0.2 if essay else 0.0)
     answer = reply.get("answer")
     if answer is None or str(answer).strip().lower() in ("", "null", "none", "n/a", "unknown"):
         raise NoEvidence("the model found nothing in your sources that answers this")

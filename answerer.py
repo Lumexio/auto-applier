@@ -23,6 +23,7 @@ from typing import Any, Callable
 from evidence import Drafted, NoEvidence, Passage, PassageStore, draft_answer, grounded, norm
 from facts import flatten, get_path, merged_view, render_lines
 from form_questions import WHOLE_LIST_MAX, Question, clean_label, match_option, normalize_key, parse_questions
+import instructions
 from llm_client import LLMError, chat_json, context_budget, estimate_tokens, for_task
 from stage2_filter.relevance import skill_in
 
@@ -561,7 +562,8 @@ def _ask_model(questions: list[Question], ctx: AnswerContext) -> dict[int, Answe
     evidence = lines.lower()
     job = f"{ctx.job.get('title', '')} at {ctx.job.get('company', '')}".strip()[:120]
     budget = context_budget(ctx.llm_cfg)
-    base = estimate_tokens(_SYSTEM) + estimate_tokens(f"FACTS:\n{lines}\n\nJOB: {job}\n\nQUESTIONS:\n")
+    system = instructions.system(_SYSTEM, "answers")
+    base = estimate_tokens(system) + estimate_tokens(f"FACTS:\n{lines}\n\nJOB: {job}\n\nQUESTIONS:\n")
 
     batches: list[list[Question]] = [[]]
     used = base
@@ -576,7 +578,7 @@ def _ask_model(questions: list[Question], ctx: AnswerContext) -> dict[int, Answe
     out: dict[int, Answer] = {}
     for batch in batches:
         user = f"FACTS:\n{lines}\n\nJOB: {job}\n\nQUESTIONS:\n" + "\n".join(json.dumps(_question_payload(q)) for q in batch)
-        data = chat_json(ctx.llm_cfg, _SYSTEM, user, max_tokens=min(500, 70 * len(batch) + 60))
+        data = chat_json(ctx.llm_cfg, system, user, max_tokens=min(500, 70 * len(batch) + 60))
         by_id = {q.id: q for q in batch}
         for entry in data.get("answers") or []:
             if not isinstance(entry, dict):

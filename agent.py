@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+import instructions
 from llm_client import LLMError, chat_json, for_task
 from page_state import SAFE_CATEGORIES, Action, PageSnapshot, take_snapshot, upload_button_kind
 from sites import ATS_HOSTS, site_fingerprint
@@ -279,7 +280,7 @@ class ApplyAgent:
             f"JOB: {self.job.get('title', '')} at {self.job.get('company', '')}\nGOAL: finish and submit this application\n"
             f"PAGE: {snap.title[:80]} ({site_fingerprint(snap.url)})\nTEXT:\n{snap.text[:900]}\n\nSO FAR:\n{history}\n\nMENU:\n" + "\n".join(menu)
         )
-        reply = chat_json(for_task(self.llm_cfg, "agent", vote), _SYSTEM, user, max_tokens=60)
+        reply = chat_json(for_task(self.llm_cfg, "agent", vote), instructions.system(_SYSTEM, "agent"), user, max_tokens=60)
         try:
             choice = int(str(reply.get("choice")).strip())
         except ValueError:

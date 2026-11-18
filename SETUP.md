@@ -793,6 +793,12 @@ It refreshes by itself when a resume changes or the month turns ("Present" moves
 questions**: any that these facts can now answer are resolved and the jobs that were only waiting on them are queued again, so
 fixing a resume or a fact un-parks the backlog without you running anything.
 
+### Your standing instructions: how the bot writes and chooses
+
+Put a short Markdown file at `me/agent-instructions.md` (copy `examples/agent-instructions.example.txt`) and every model that writes an answer, a recruiter note or picks a button on an unfamiliar page reads it first. Use it for style and preferences: "plain first person, under 60 words", "never use the word passionate", "prefer the company's own site when two buttons both fit". Optional `## answers`, `## essays`, `## outreach` and `## agent` sections apply to one task only; text above the first heading applies to all of them.
+
+It steers wording and choices, never facts. The checks that refuse an invented number, link, employer or degree are code that runs after the model answers, and the model that double-checks a draft does not see this file. The text is cut after about 1500 characters (a small model has a small window), is re-read at the start of every cycle (no restart needed) and is switched off with `instructions: {enabled: false}`.
+
 ### What is waiting for you, and the desk at login
 
 ```powershell

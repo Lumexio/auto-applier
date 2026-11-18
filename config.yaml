@@ -68,6 +68,11 @@ llm:
 #       agent: [pilot, heavy]
 #       fit_review: heavy      # a DIFFERENT model double-checks a deal-breaker that overrides a good score (python fit_review.py)
 
+# Your standing instructions: a Markdown file (paths.source_dir/agent-instructions.md) the models read before they write or choose.
+# It steers style and preferences only; the checks against invented facts are code and never see it. See examples/agent-instructions.example.txt.
+instructions:
+  enabled: true
+
 # What the bot may claim about your experience is computed from the resumes in paths.source_dir (python source.py show).
 # Years come from the dates next to each job; a framework implies its language (Laravel -> PHP, Vue -> JavaScript). A value you
 # write in facts.yaml always wins over what is computed. `python source.py sync` copies your resume versions in.
