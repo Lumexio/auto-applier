@@ -799,6 +799,16 @@ Put a short Markdown file at `me/agent-instructions.md` (copy `examples/agent-in
 
 It steers wording and choices, never facts. The checks that refuse an invented number, link, employer or degree are code that runs after the model answers, and the model that double-checks a draft does not see this file. The text is cut after about 1500 characters (a small model has a small window), is re-read at the start of every cycle (no restart needed) and is switched off with `instructions: {enabled: false}`.
 
+### Finding the right lines of your resumes (BM25 and meaning)
+
+When a question is not on your fact sheet the bot looks for the lines of your resumes and notes it is about. It ranks them two ways and merges the lists: **BM25** (the distinctive words a line shares with the question: "PostgreSQL" finds PostgreSQL) and **meaning**, using a small local embedding model, so "have you managed other developers?" finds "Mentored four junior engineers" although they share no word.
+
+    ollama pull nomic-embed-text
+
+That is a 274 MB download, small enough to sit beside your other models. It is on by default (`retrieval: {mode: hybrid}`); `mode: keyword` turns it off. If the model is not pulled or Ollama is busy, search stays on BM25, prints one line saying so and tries again after five minutes. The vectors are kept in `.scratch/embeddings.json` (rebuilt when you change the model; only new or changed lines are embedded). A line that matches only by meaning must reach `min_similarity` (0.55), so an unrelated question still finds nothing and parks instead of being shown "whatever is nearest".
+
+Search only chooses which of your own lines the model sees. The quotes must still appear word for word in them, no number or link may be invented, and a second call confirms the draft, so a bad ranking can cost an answer but cannot create a false one.
+
 ### Skills: procedures for pages the agent does not recognise
 
 When the agent reaches a page with several buttons and no obvious next step, it asks the model to choose one. If the page matches a **skill**, that skill's short procedure is added to the question. Five ship in `skills/`: a company landing page full of unrelated buttons, "apply on the company site", an assessment or video interview (the right answer is to stop and leave it to you), an account wall (it never creates an account) and the review-and-consent steps.

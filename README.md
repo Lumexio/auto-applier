@@ -332,6 +332,7 @@ Then run it for real: `setup.bat -All` starts everything and opens the dashboard
 | `agent.py`, `page_state.py` | The application agent and the page/button classifier |
 | `form_questions.py`, `answerer.py`, `facts.py`, `answers.py` | Reading form fields and answering from your facts |
 | `evidence.py` | Answers drafted from your own resumes and notes: quoted, checked in code, confirmed by a second model call |
+| `retrieval.py` | Finding the lines of your resumes a question is about: BM25 plus a local embedding model, merged |
 | `resume_pick.py` | Which resume version goes with which job |
 | `instructions.py` | Your standing instructions (`me/agent-instructions.md`) handed to the models that write and choose |
 | `agent_skills.py`, `skills/` | Procedures the agent loads for pages it does not recognise (add yours in `me/skills/`) |

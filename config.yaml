@@ -73,6 +73,15 @@ llm:
 instructions:
   enabled: true
 
+# Finding the lines of your resumes and notes a question is about. BM25 matches the words; the embedding model (ollama pull nomic-embed-text,
+# 274 MB, small enough to sit beside your other models) also matches meaning ("managed engineers" for "led a team"). Both rankings are merged. If
+# the model is missing or Ollama is busy, search stays on BM25 and says so once. Only decides WHICH lines the model is shown: the checks that
+# refuse an invented fact run afterwards.
+retrieval:
+  mode: "hybrid"                 # "keyword" turns the embedding model off
+  embedding_model: "nomic-embed-text"
+  min_similarity: 0.55           # a passage that matches only by meaning must be at least this similar (0-1); raise it if unrelated lines appear
+
 # What the bot may claim about your experience is computed from the resumes in paths.source_dir (python source.py show).
 # Years come from the dates next to each job; a framework implies its language (Laravel -> PHP, Vue -> JavaScript). A value you
 # write in facts.yaml always wins over what is computed. `python source.py sync` copies your resume versions in.

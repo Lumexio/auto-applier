@@ -4,7 +4,7 @@ The fact sheet (facts.yaml) answers the questions every application asks. The re
 "what is your biggest career win", "why do you want this role" -- can only be answered from what you wrote about yourself.
 This module finds that text and holds a model to it:
 
-1. **retrieve**  the passages of your resumes and notes that share the question's words (no model, no embeddings);
+1. **retrieve**  the passages of your resumes and notes the question is about (BM25 on words, plus a local embedding model for meaning; see retrieval.py);
 2. **draft**     a model answers from those passages and the fact sheet ONLY, and must quote the lines it relied on;
 3. **check**     (plain code) every quote exists word for word in the passages shown to the model, and the answer adds no link,
                  number, tool or name that the passages, the fact sheet or the job do not contain;
@@ -27,6 +27,7 @@ from typing import Any, Callable
 import doc_text
 from form_questions import Question
 import instructions
+import retrieval
 from llm_client import LLMError, chat_json, context_budget, estimate_tokens
 from resume_facts import source_files
 
@@ -161,22 +162,26 @@ def tokens(text: str) -> list[str]:
 
 
 def retrieve(query: str, passages: list[Passage], k: int = 6, always: bool = False) -> list[Passage]:
-    """The ``k`` passages that share the most (rare) words with ``query``. ``always`` adds the summary lines of your resume (an essay is about you)."""
-    wanted = set(tokens(query))
+    """The ``k`` passages most about ``query``: BM25 on the words they share and, when the embedding model answers, on meaning too (merged).
+
+    A passage that matches only by meaning must clear ``retrieval.min_similarity``, so an unrelated question still finds nothing (and parks)
+    instead of being shown whatever is nearest. ``always`` adds the summary lines of your resume (an essay is about you).
+    """
+    wanted = tokens(query)
     chosen: list[Passage] = []
-    if wanted and passages:
-        bags = [set(tokens(p.text)) for p in passages]
-        heads = [set(tokens(p.context)) for p in passages]
-        df: dict[str, int] = {}
-        for bag in bags:
-            for t in bag:
-                df[t] = df.get(t, 0) + 1
-        scored = []
-        for i in range(len(passages)):
-            score = sum(math.log(1 + len(passages) / df[t]) for t in wanted if t in bags[i]) + 0.5 * sum(1 for t in wanted if t in heads[i])
-            if score > 0:
-                scored.append((-score, i))
-        chosen = [passages[i] for _, i in sorted(scored)[:k]]
+    if passages:
+        keyword: list[int] = []
+        if wanted:
+            heads = [set(tokens(p.context)) for p in passages]
+            keyword = retrieval.ranked(retrieval.bm25(wanted, [tokens(p.text) for p in passages], heads), max(k, int(retrieval.DEFAULTS["candidates"])))
+        meaning: list[int] = []
+        if retrieval.mode() == "hybrid":
+            sims = retrieval.meaning_scores(query, [p.shown for p in passages])
+            if sims:
+                floor = float(retrieval._settings["min_similarity"])
+                meaning = retrieval.ranked([s if s >= floor else 0.0 for s in sims], int(retrieval._settings["candidates"]))
+        order = retrieval.fuse(keyword, meaning, limit=k) if meaning else keyword[:k]
+        chosen = [passages[i] for i in order]
     if always:
         about_you = [p for p in passages if _SUMMARY_CONTEXT.search(p.context) and p not in chosen]
         chosen.extend(about_you[:2])
