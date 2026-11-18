@@ -23,6 +23,7 @@ from typing import Any, Callable
 from evidence import Drafted, NoEvidence, Passage, PassageStore, draft_answer, grounded, norm
 from facts import flatten, get_path, merged_view, render_lines
 from form_questions import WHOLE_LIST_MAX, Question, clean_label, match_option, normalize_key, parse_questions
+import instructions
 from llm_client import LLMError, chat_json, context_budget, estimate_tokens, for_task
 from stage2_filter.relevance import skill_in
 
@@ -32,6 +33,7 @@ DEFAULT_ANSWERS_CFG = {
     "open_ended": "propose",          # essays: "review" parks them untouched | "propose" drafts one from your sources and parks it for your OK | "generate" fills a verified draft in
     "answer_optional": False,         # also answer optional questions the model would have to guess
     "evidence": True,                 # a question the fact sheet cannot answer is tried against your resumes and notes (quoted, checked, verified)
+    "query_rewrites": 1,              # when the search finds nothing the model may write a better search query this many times (0 = never)
     "evidence_passages": 6,           # how many passages of your sources one question may be shown
     "require_independent_verifier": False,   # True: a draft is only trusted when a DIFFERENT model than the author confirmed it (models.tasks.verify)
 }
@@ -561,7 +563,8 @@ def _ask_model(questions: list[Question], ctx: AnswerContext) -> dict[int, Answe
     evidence = lines.lower()
     job = f"{ctx.job.get('title', '')} at {ctx.job.get('company', '')}".strip()[:120]
     budget = context_budget(ctx.llm_cfg)
-    base = estimate_tokens(_SYSTEM) + estimate_tokens(f"FACTS:\n{lines}\n\nJOB: {job}\n\nQUESTIONS:\n")
+    system = instructions.system(_SYSTEM, "answers")
+    base = estimate_tokens(system) + estimate_tokens(f"FACTS:\n{lines}\n\nJOB: {job}\n\nQUESTIONS:\n")
 
     batches: list[list[Question]] = [[]]
     used = base
@@ -576,7 +579,7 @@ def _ask_model(questions: list[Question], ctx: AnswerContext) -> dict[int, Answe
     out: dict[int, Answer] = {}
     for batch in batches:
         user = f"FACTS:\n{lines}\n\nJOB: {job}\n\nQUESTIONS:\n" + "\n".join(json.dumps(_question_payload(q)) for q in batch)
-        data = chat_json(ctx.llm_cfg, _SYSTEM, user, max_tokens=min(500, 70 * len(batch) + 60))
+        data = chat_json(ctx.llm_cfg, system, user, max_tokens=min(500, 70 * len(batch) + 60))
         by_id = {q.id: q for q in batch}
         for entry in data.get("answers") or []:
             if not isinstance(entry, dict):
@@ -627,7 +630,7 @@ def _evidence_for(q: Question, ctx: AnswerContext, essay: bool) -> Drafted | Blo
         drafted = draft_answer(
             q, ctx.job, facts_text, passages, draft_cfg, ctx.verify_cfg or draft_cfg, essay=essay,
             k=int(ctx.setting("evidence_passages")), require_independent=bool(ctx.setting("require_independent_verifier")),
-            chat=chat_json,
+            rewrites=int(ctx.setting("query_rewrites")), chat=chat_json,
         )
     except NoEvidence as e:
         return Blocked(str(e))

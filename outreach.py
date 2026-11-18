@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+import instructions
+
 
 _SKIP_NAMES = {"linkedin", "sign in", "me", "home", "skip", "message", "connect", "follow", "view profile", "premium"}
 # A drafted note must never carry a link or an address: it comes from a model that read scraped page text.
@@ -152,7 +154,7 @@ def generate_llm_outreach(
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are a job applicant writing a polite, direct LinkedIn connection note. You MUST respond with ONLY the message text. Strictly under 280 characters.",
+                    "content": instructions.system("You are a job applicant writing a polite, direct LinkedIn connection note. You MUST respond with ONLY the message text. Strictly under 280 characters.", "outreach"),
                 },
                 {"role": "user", "content": prompt},
             ],

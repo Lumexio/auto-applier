@@ -793,6 +793,34 @@ It refreshes by itself when a resume changes or the month turns ("Present" moves
 questions**: any that these facts can now answer are resolved and the jobs that were only waiting on them are queued again, so
 fixing a resume or a fact un-parks the backlog without you running anything.
 
+### Your standing instructions: how the bot writes and chooses
+
+Put a short Markdown file at `me/agent-instructions.md` (copy `examples/agent-instructions.example.txt`) and every model that writes an answer, a recruiter note or picks a button on an unfamiliar page reads it first. Use it for style and preferences: "plain first person, under 60 words", "never use the word passionate", "prefer the company's own site when two buttons both fit". Optional `## answers`, `## essays`, `## outreach` and `## agent` sections apply to one task only; text above the first heading applies to all of them.
+
+It steers wording and choices, never facts. The checks that refuse an invented number, link, employer or degree are code that runs after the model answers, and the model that double-checks a draft does not see this file. The text is cut after about 1500 characters (a small model has a small window), is re-read at the start of every cycle (no restart needed) and is switched off with `instructions: {enabled: false}`.
+
+### Finding the right lines of your resumes (BM25 and meaning)
+
+When a question is not on your fact sheet the bot looks for the lines of your resumes and notes it is about. It ranks them two ways and merges the lists: **BM25** (the distinctive words a line shares with the question: "PostgreSQL" finds PostgreSQL) and **meaning**, using a small local embedding model, so "have you managed other developers?" finds "Mentored four junior engineers" although they share no word.
+
+    ollama pull nomic-embed-text
+
+That is a 274 MB download, small enough to sit beside your other models. It is on by default (`retrieval: {mode: hybrid}`); `mode: keyword` turns it off. If the model is not pulled or Ollama is busy, search stays on BM25, prints one line saying so and tries again after five minutes. The vectors are kept in `.scratch/embeddings.json` (rebuilt when you change the model; only new or changed lines are embedded). A line that matches only by meaning must reach `min_similarity` (0.55), so an unrelated question still finds nothing and parks instead of being shown "whatever is nearest".
+
+If the search finds nothing, or the model finds nothing to answer from the lines it was shown, the model may write a better search query (a handful of resume-style words, never an answer) and the search runs again: `answers: {query_rewrites: 1}` (0 turns it off, 2 is the most). A second search that returns the lines already tried is not drafted from again, and a draft that failed a check is never retried.
+
+To see whether it works on YOUR resumes, run `python rag_eval.py`. It builds a test set from your own history (the answers you saved or approved and the drafts waiting in `answers.py pending`; the right line for each is the one holding its quotes or most of its words), runs the real search on every question and prints, for keyword-only and for hybrid search, how often the right line came first, in the top three and in the top `answers.evidence_passages`, how often nothing was found, and how many questions hybrid rescued or lost. `--misses` lists the questions whose line was not found; `--draft` also runs the full draft-and-check on a few of them with your models and reports whether the draft was verified and cited the right line. It reads `state.db` and `me/` and writes nothing. Approve a few drafts first: with no history there is nothing to measure.
+
+Search only chooses which of your own lines the model sees. The quotes must still appear word for word in them, no number or link may be invented, and a second call confirms the draft, so a bad ranking can cost an answer but cannot create a false one.
+
+### Skills: procedures for pages the agent does not recognise
+
+When the agent reaches a page with several buttons and no obvious next step, it asks the model to choose one. If the page matches a **skill**, that skill's short procedure is added to the question. Five ship in `skills/`: a company landing page full of unrelated buttons, "apply on the company site", an assessment or video interview (the right answer is to stop and leave it to you), an account wall (it never creates an account) and the review-and-consent steps.
+
+Add your own as `me/skills/<name>/SKILL.md`: a header with `name`, a one-line `description` and `when` (a list of case-insensitive regular expressions that are compared with the page's title, text and button labels), then the steps in plain words. A skill of yours with the same name replaces the built-in one. They are re-read every cycle; `agent: {skills: false}` turns them off, and every step's trace (`applications/<job>/…/steps.jsonl`) records which skill, if any, was loaded.
+
+A skill only helps the model pick better. The model still answers with a number from the menu the code built, so a skill cannot add a button, press Submit, create an account or leave the sites the agent may visit, and text on a page can never write or load a skill.
+
 ### What is waiting for you, and the desk at login
 
 ```powershell

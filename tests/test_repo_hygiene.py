@@ -4,6 +4,7 @@ nothing already tracked may match a rule (a file that is both tracked and ignore
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -66,7 +67,7 @@ def test_nothing_tracked_matches_an_ignore_rule():
     assert not out, f"tracked although ignored (remove with `git rm --cached`): {out}"
     tracked = subprocess.run([GIT, "ls-files"], cwd=ROOT, capture_output=True, text=True).stdout.splitlines()
     assert not [t for t in tracked if t in ("profile.json", "facts.yaml", ".api_token", "state.db") or t.startswith(("me/", ".browser_profile/", "applications/"))]
-    markdown = sorted(t for t in tracked if t.lower().endswith((".md", ".mdc")))
+    markdown = sorted(t for t in tracked if t.lower().endswith((".md", ".mdc")) and not re.fullmatch(r"skills/[a-z0-9-]+/SKILL\.md", t))   # the agent's skills are product files
     assert markdown == ["README.md", "SETUP.md"], f"unexpected Markdown in the repository: {markdown}"
 
 

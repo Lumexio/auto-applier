@@ -68,6 +68,20 @@ llm:
 #       agent: [pilot, heavy]
 #       fit_review: heavy      # a DIFFERENT model double-checks a deal-breaker that overrides a good score (python fit_review.py)
 
+# Your standing instructions: a Markdown file (paths.source_dir/agent-instructions.md) the models read before they write or choose.
+# It steers style and preferences only; the checks against invented facts are code and never see it. See examples/agent-instructions.example.txt.
+instructions:
+  enabled: true
+
+# Finding the lines of your resumes and notes a question is about. BM25 matches the words; the embedding model (ollama pull nomic-embed-text,
+# 274 MB, small enough to sit beside your other models) also matches meaning ("managed engineers" for "led a team"). Both rankings are merged. If
+# the model is missing or Ollama is busy, search stays on BM25 and says so once. Only decides WHICH lines the model is shown: the checks that
+# refuse an invented fact run afterwards.
+retrieval:
+  mode: "hybrid"                 # "keyword" turns the embedding model off
+  embedding_model: "nomic-embed-text"
+  min_similarity: 0.55           # a passage that matches only by meaning must be at least this similar (0-1); raise it if unrelated lines appear
+
 # What the bot may claim about your experience is computed from the resumes in paths.source_dir (python source.py show).
 # Years come from the dates next to each job; a framework implies its language (Laravel -> PHP, Vue -> JavaScript). A value you
 # write in facts.yaml always wins over what is computed. `python source.py sync` copies your resume versions in.
@@ -153,6 +167,7 @@ stage3:
 agent:
   enabled: true                  # false: sites without a dedicated handler are skipped instead of explored
   takeover: true                 # a handler that finds nothing it knows how to do (LinkedIn "no apply button") hands the page to the agent instead of failing
+  skills: true                   # on a page it does not recognise the agent loads the best-matching procedure from skills/ (yours: me/skills/<name>/SKILL.md)
   max_steps: 30                 # pages / clicks one application may take before the agent gives up
   max_seconds: 360               # wall-clock limit for walking one application
   consensus: 2                   # model votes (in different menu orders) that must agree; 1 = trust a single answer
@@ -171,6 +186,7 @@ answers:
   answer_optional: false         # false: leave optional questions the model would have to guess
   evidence: true                 # a question the fact sheet cannot answer is tried against your resumes and notes: the model must quote them,
                                  # code checks the quotes and that no link / number / name is invented, a second call confirms it
+  query_rewrites: 1              # nothing found (or the model found nothing in what it saw): it may write a better search query this many times (0-2)
   evidence_passages: 6           # how many lines of your sources one question may be shown
   require_independent_verifier: false   # true: only trust a draft that a DIFFERENT model than its author confirmed (models.tasks.verify)
 

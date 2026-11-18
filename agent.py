@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+import agent_skills
+import instructions
 from llm_client import LLMError, chat_json, for_task
 from page_state import SAFE_CATEGORIES, Action, PageSnapshot, take_snapshot, upload_button_kind
 from sites import ATS_HOSTS, site_fingerprint
@@ -125,6 +127,7 @@ class ApplyAgent:
         self._pressed_uploads: set[tuple[str, str]] = set()   # (document, button) already tried: a button that stays on the page is not pressed again
         self._answering = 0.0                              # seconds spent drafting answers: a long form must not use up the page-walking budget
         self._after_apply = False
+        self._skill = ""                                   # the skill loaded for the step being decided (written to its trace entry)
         self._after_click: tuple[frozenset[str], set[str]] | None = None   # (question labels, errors) just before the last step click
         self.allowed: set[str] = {name for _, name in ATS_HOSTS} | {str(d).lower() for d in self.cfg["allowed_domains"]}
         self.allowed.add(site_fingerprint(session.current_url()))
@@ -279,7 +282,12 @@ class ApplyAgent:
             f"JOB: {self.job.get('title', '')} at {self.job.get('company', '')}\nGOAL: finish and submit this application\n"
             f"PAGE: {snap.title[:80]} ({site_fingerprint(snap.url)})\nTEXT:\n{snap.text[:900]}\n\nSO FAR:\n{history}\n\nMENU:\n" + "\n".join(menu)
         )
-        reply = chat_json(for_task(self.llm_cfg, "agent", vote), _SYSTEM, user, max_tokens=60)
+        system = instructions.system(_SYSTEM, "agent")
+        skill = agent_skills.best("\n".join([snap.title, snap.text[:900], *(a.label for a in ordered)]))
+        if skill:                                              # load the procedure that fits this kind of page (guidance for the choice, not an action)
+            system += "\n\n" + agent_skills.prompt_block(skill)
+            self._skill = skill.name
+        reply = chat_json(for_task(self.llm_cfg, "agent", vote), system, user, max_tokens=60)
         try:
             choice = int(str(reply.get("choice")).strip())
         except ValueError:
@@ -403,8 +411,9 @@ class ApplyAgent:
             "questions": len(snap.questions), "files": len(snap.files), "errors": snap.errors[:3],
             "actions": [f"{a.category}:{a.label}" for a in snap.actions if a.category != "never"][:15],
             "decision": decision.kind, "target": decision.action.label if decision.action else None,
-            "why": decision.why, "source": decision.source, "so_far": self.history[-3:],       # what was done before this step, e.g. a file attached
+            "why": decision.why, "source": decision.source, "skill": self._skill, "so_far": self.history[-3:],       # what was done before this step, e.g. a file attached
         }
+        self._skill = ""
         self.trace.append(entry)
         if not self.trace_dir:
             return

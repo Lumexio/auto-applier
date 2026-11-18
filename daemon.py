@@ -23,6 +23,9 @@ from stage3_apply.run import stage3_run
 from state import StateStore
 from import_profile import sync_system_firefox_profile
 import daemon_status
+import agent_skills
+import instructions
+import retrieval
 import llm_client
 import outreach_queue
 import reverify
@@ -228,6 +231,9 @@ class Daemon:
         return json.loads(self.profile_path.read_text(encoding="utf-8"))
 
     def run_cycle(self, dry_run: bool = False) -> None:
+        instructions.load_from(self.config)                 # your standing instructions, re-read every cycle
+        retrieval.configure(self.config)                    # how passages of your resumes are found (keyword / hybrid)
+        agent_skills.load_from(self.config)                 # and the agent's skills (skills/ and me/skills/)
         profile = self.load_or_generate_profile()
         cfg_hash = hash_dict(self.config)
         prof_hash = hash_dict(profile)

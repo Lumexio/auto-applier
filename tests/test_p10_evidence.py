@@ -260,7 +260,7 @@ def test_nothing_is_drafted_when_the_sources_are_silent_or_a_model_is_down_or_ev
     with Sources() as src:
         silent = q("Do you hold a pilot licence for gliders?", qid=2)
         with patch("answerer.chat_json", side_effect=model(None)) as seen:
-            plan = plan_answers([silent], context(src))
+            plan = plan_answers([silent], context(src, cfg={"query_rewrites": 0}))
         assert plan.unanswered == [silent] and "nothing in your resumes" in plan.reasons[2] and seen.call_count == 1       # no passage: only the batch call was made
 
         with patch("answerer.chat_json", side_effect=model(LLMError("connection refused"))):
