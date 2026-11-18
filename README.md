@@ -334,6 +334,7 @@ Then run it for real: `setup.bat -All` starts everything and opens the dashboard
 | `evidence.py` | Answers drafted from your own resumes and notes: quoted, checked in code, confirmed by a second model call |
 | `resume_pick.py` | Which resume version goes with which job |
 | `instructions.py` | Your standing instructions (`me/agent-instructions.md`) handed to the models that write and choose |
+| `agent_skills.py`, `skills/` | Procedures the agent loads for pages it does not recognise (add yours in `me/skills/`) |
 | `reverify.py` | The second look at applications that were sent but never confirmed |
 | `llm_client.py` | The local-model client: roles, fallbacks, the circuit breaker for failing models |
 | `state.py`, `schema.sql`, `sites.py` | SQLite state, migrations, site trust (probation) |

@@ -799,6 +799,14 @@ Put a short Markdown file at `me/agent-instructions.md` (copy `examples/agent-in
 
 It steers wording and choices, never facts. The checks that refuse an invented number, link, employer or degree are code that runs after the model answers, and the model that double-checks a draft does not see this file. The text is cut after about 1500 characters (a small model has a small window), is re-read at the start of every cycle (no restart needed) and is switched off with `instructions: {enabled: false}`.
 
+### Skills: procedures for pages the agent does not recognise
+
+When the agent reaches a page with several buttons and no obvious next step, it asks the model to choose one. If the page matches a **skill**, that skill's short procedure is added to the question. Five ship in `skills/`: a company landing page full of unrelated buttons, "apply on the company site", an assessment or video interview (the right answer is to stop and leave it to you), an account wall (it never creates an account) and the review-and-consent steps.
+
+Add your own as `me/skills/<name>/SKILL.md`: a header with `name`, a one-line `description` and `when` (a list of case-insensitive regular expressions that are compared with the page's title, text and button labels), then the steps in plain words. A skill of yours with the same name replaces the built-in one. They are re-read every cycle; `agent: {skills: false}` turns them off, and every step's trace (`applications/<job>/…/steps.jsonl`) records which skill, if any, was loaded.
+
+A skill only helps the model pick better. The model still answers with a number from the menu the code built, so a skill cannot add a button, press Submit, create an account or leave the sites the agent may visit, and text on a page can never write or load a skill.
+
 ### What is waiting for you, and the desk at login
 
 ```powershell
