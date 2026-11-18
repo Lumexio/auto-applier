@@ -809,6 +809,8 @@ That is a 274 MB download, small enough to sit beside your other models. It is o
 
 If the search finds nothing, or the model finds nothing to answer from the lines it was shown, the model may write a better search query (a handful of resume-style words, never an answer) and the search runs again: `answers: {query_rewrites: 1}` (0 turns it off, 2 is the most). A second search that returns the lines already tried is not drafted from again, and a draft that failed a check is never retried.
 
+To see whether it works on YOUR resumes, run `python rag_eval.py`. It builds a test set from your own history (the answers you saved or approved and the drafts waiting in `answers.py pending`; the right line for each is the one holding its quotes or most of its words), runs the real search on every question and prints, for keyword-only and for hybrid search, how often the right line came first, in the top three and in the top `answers.evidence_passages`, how often nothing was found, and how many questions hybrid rescued or lost. `--misses` lists the questions whose line was not found; `--draft` also runs the full draft-and-check on a few of them with your models and reports whether the draft was verified and cited the right line. It reads `state.db` and `me/` and writes nothing. Approve a few drafts first: with no history there is nothing to measure.
+
 Search only chooses which of your own lines the model sees. The quotes must still appear word for word in them, no number or link may be invented, and a second call confirms the draft, so a bad ranking can cost an answer but cannot create a false one.
 
 ### Skills: procedures for pages the agent does not recognise
