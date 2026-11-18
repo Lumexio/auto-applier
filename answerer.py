@@ -33,6 +33,7 @@ DEFAULT_ANSWERS_CFG = {
     "open_ended": "propose",          # essays: "review" parks them untouched | "propose" drafts one from your sources and parks it for your OK | "generate" fills a verified draft in
     "answer_optional": False,         # also answer optional questions the model would have to guess
     "evidence": True,                 # a question the fact sheet cannot answer is tried against your resumes and notes (quoted, checked, verified)
+    "query_rewrites": 1,              # when the search finds nothing the model may write a better search query this many times (0 = never)
     "evidence_passages": 6,           # how many passages of your sources one question may be shown
     "require_independent_verifier": False,   # True: a draft is only trusted when a DIFFERENT model than the author confirmed it (models.tasks.verify)
 }
@@ -629,7 +630,7 @@ def _evidence_for(q: Question, ctx: AnswerContext, essay: bool) -> Drafted | Blo
         drafted = draft_answer(
             q, ctx.job, facts_text, passages, draft_cfg, ctx.verify_cfg or draft_cfg, essay=essay,
             k=int(ctx.setting("evidence_passages")), require_independent=bool(ctx.setting("require_independent_verifier")),
-            chat=chat_json,
+            rewrites=int(ctx.setting("query_rewrites")), chat=chat_json,
         )
     except NoEvidence as e:
         return Blocked(str(e))

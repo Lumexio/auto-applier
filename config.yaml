@@ -186,6 +186,7 @@ answers:
   answer_optional: false         # false: leave optional questions the model would have to guess
   evidence: true                 # a question the fact sheet cannot answer is tried against your resumes and notes: the model must quote them,
                                  # code checks the quotes and that no link / number / name is invented, a second call confirms it
+  query_rewrites: 1              # nothing found (or the model found nothing in what it saw): it may write a better search query this many times (0-2)
   evidence_passages: 6           # how many lines of your sources one question may be shown
   require_independent_verifier: false   # true: only trust a draft that a DIFFERENT model than its author confirmed (models.tasks.verify)
 

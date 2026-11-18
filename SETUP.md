@@ -807,6 +807,8 @@ When a question is not on your fact sheet the bot looks for the lines of your re
 
 That is a 274 MB download, small enough to sit beside your other models. It is on by default (`retrieval: {mode: hybrid}`); `mode: keyword` turns it off. If the model is not pulled or Ollama is busy, search stays on BM25, prints one line saying so and tries again after five minutes. The vectors are kept in `.scratch/embeddings.json` (rebuilt when you change the model; only new or changed lines are embedded). A line that matches only by meaning must reach `min_similarity` (0.55), so an unrelated question still finds nothing and parks instead of being shown "whatever is nearest".
 
+If the search finds nothing, or the model finds nothing to answer from the lines it was shown, the model may write a better search query (a handful of resume-style words, never an answer) and the search runs again: `answers: {query_rewrites: 1}` (0 turns it off, 2 is the most). A second search that returns the lines already tried is not drafted from again, and a draft that failed a check is never retried.
+
 Search only chooses which of your own lines the model sees. The quotes must still appear word for word in them, no number or link may be invented, and a second call confirms the draft, so a bad ranking can cost an answer but cannot create a false one.
 
 ### Skills: procedures for pages the agent does not recognise
